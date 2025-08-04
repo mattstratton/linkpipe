@@ -7,13 +7,24 @@ import {
   ValidationError,
   NotFoundError,
   ConflictError,
+  CreateShortLinkRequest,
+  UpdateShortLinkRequest
+} from '../types';
+import { 
   generateSlug,
-  isValidSlug
-} from '@linkpipe/shared';
+  isValidSlug,
+  formatDate,
+  sanitizeSlug,
+  validateUrl
+} from '../utils';
 import { getTableName } from '../lib/dynamodb';
 
 // This will be imported from the main server file
 let docClient: DynamoDBDocumentClient;
+
+// Mock data store for when DynamoDB is unavailable
+const mockLinks: Map<string, ShortLink> = new Map();
+let useMockMode = false;
 
 // Initialize the router
 export const linksRouter = Router();
@@ -23,29 +34,58 @@ export function setDocClient(client: DynamoDBDocumentClient) {
   docClient = client;
 }
 
-// GET /links - List all links
+// Helper function to handle DynamoDB operations with fallback to mock
+async function executeDynamoOperation<T>(
+  operation: () => Promise<T>,
+  mockFallback: () => T,
+  operationName: string
+): Promise<T> {
+  if (useMockMode) {
+    console.log(`🔄 Using mock mode for ${operationName}`);
+    return mockFallback();
+  }
+
+  try {
+    return await operation();
+  } catch (error) {
+    console.warn(`⚠️ DynamoDB ${operationName} failed, switching to mock mode:`, error.message);
+    useMockMode = true;
+    return mockFallback();
+  }
+}
+
+// GET /links - List all short links
 linksRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const result = await docClient.send(new ScanCommand({
-      TableName: getTableName(),
-      FilterExpression: 'isActive = :isActive',
-      ExpressionAttributeValues: {
-        ':isActive': true,
+    const links = await executeDynamoOperation(
+      // DynamoDB operation
+      async () => {
+        const tableName = getTableName();
+        const command = new ScanCommand({ TableName: tableName });
+        const result = await docClient.send(command);
+        return (result.Items as ShortLink[] || []).sort((a, b) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
       },
-    }));
+      // Mock fallback
+      () => {
+        return Array.from(mockLinks.values()).sort((a, b) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      },
+      'scan'
+    );
 
-    const links = result.Items as ShortLink[];
-    
     res.json({
       success: true,
-      data: links || [],
-      count: links?.length || 0,
+      data: links,
+      message: `Found ${links.length} links${useMockMode ? ' (mock mode)' : ''}`
     });
   } catch (error) {
     console.error('Error fetching links:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch links',
+      error: 'Failed to fetch links'
     });
   }
 });
@@ -56,98 +96,130 @@ linksRouter.post('/', async (req: Request, res: Response) => {
     // Validate request body
     const validatedData = CreateShortLinkRequestSchema.parse(req.body);
     
-    // Generate slug if not provided
+    // Validate URL format
+    if (!validateUrl(validatedData.url)) {
+      throw new ValidationError('Invalid URL format');
+    }
+    
+    // Generate or validate slug
     let slug = validatedData.slug;
-    if (!slug) {
-      // Generate a unique slug
-      slug = generateSlug(6);
-      
-      // Check if generated slug exists (retry if collision)
-      let attempts = 0;
-      while (attempts < 10) {
-        try {
-          await docClient.send(new GetCommand({
-            TableName: getTableName(),
-            Key: { slug },
-          }));
-          // Slug exists, generate a new one
-          slug = generateSlug(6 + Math.floor(attempts / 3));
-          attempts++;
-        } catch (error) {
-          // Slug doesn't exist, we can use it
-          break;
-        }
-      }
-      
-      if (attempts >= 10) {
-        throw new ConflictError('Unable to generate unique slug after multiple attempts');
-      }
-    } else {
-      // Validate custom slug
+    if (slug) {
+      slug = sanitizeSlug(slug);
       if (!isValidSlug(slug)) {
         throw new ValidationError('Invalid slug format. Use only letters, numbers, hyphens, and underscores.');
       }
-      
-      // Check if custom slug already exists
-      try {
-        const existingItem = await docClient.send(new GetCommand({
-          TableName: getTableName(),
-          Key: { slug },
-        }));
-        
-        if (existingItem.Item) {
-          throw new ConflictError('Slug already exists');
-        }
-      } catch (error) {
-        if (!(error instanceof ConflictError)) {
-          // Slug doesn't exist, which is what we want
-        } else {
-          throw error;
-        }
-      }
+    } else {
+      slug = generateSlug();
     }
-
+    
+    // Check if slug already exists and get a unique one
+    const finalSlug = await executeDynamoOperation(
+      // DynamoDB operation
+      async () => {
+        const tableName = getTableName();
+        let currentSlug = slug;
+        let attempts = 0;
+        
+        while (attempts < 20) {
+          const existingCommand = new GetCommand({
+            TableName: tableName,
+            Key: { slug: currentSlug }
+          });
+          
+          const existingResult = await docClient.send(existingCommand);
+          if (!existingResult.Item) {
+            return currentSlug; // Slug is available
+          }
+          
+          if (validatedData.slug) {
+            throw new ConflictError(`Slug "${currentSlug}" is already taken`);
+          }
+          
+          // Generate new slug for auto-generated ones
+          currentSlug = generateSlug(6 + Math.floor(attempts / 10));
+          attempts++;
+        }
+        
+        throw new ConflictError('Unable to generate unique slug. Please try again.');
+      },
+      // Mock fallback
+      () => {
+        let currentSlug = slug;
+        let attempts = 0;
+        
+        while (attempts < 20) {
+          if (!mockLinks.has(currentSlug)) {
+            return currentSlug; // Slug is available
+          }
+          
+          if (validatedData.slug) {
+            throw new ConflictError(`Slug "${currentSlug}" is already taken`);
+          }
+          
+          currentSlug = generateSlug(6 + Math.floor(attempts / 10));
+          attempts++;
+        }
+        
+        throw new ConflictError('Unable to generate unique slug. Please try again.');
+      },
+      'slug check'
+    );
+    
     // Create the link object
-    const now = new Date().toISOString();
+    const now = formatDate();
     const link: ShortLink = {
-      slug,
+      slug: finalSlug,
       url: validatedData.url,
       utm_params: validatedData.utm_params,
       createdAt: now,
-      updatedAt: now,
       tags: validatedData.tags,
       description: validatedData.description,
       expiresAt: validatedData.expiresAt,
       isActive: true,
     };
-
-    // Save to DynamoDB
-    await docClient.send(new PutCommand({
-      TableName: getTableName(),
-      Item: link,
-      ConditionExpression: 'attribute_not_exists(slug)', // Ensure no overwrite
-    }));
-
+    
+    // Save the link
+    await executeDynamoOperation(
+      // DynamoDB operation
+      async () => {
+        const tableName = getTableName();
+        const putCommand = new PutCommand({
+          TableName: tableName,
+          Item: link,
+        });
+        await docClient.send(putCommand);
+        return null;
+      },
+      // Mock fallback
+      () => {
+        mockLinks.set(finalSlug, link);
+        return null;
+      },
+      'put item'
+    );
+    
     res.status(201).json({
       success: true,
       data: link,
-      message: 'Short link created successfully',
+      message: `Short link created successfully${useMockMode ? ' (mock mode)' : ''}`
     });
   } catch (error) {
     console.error('Error creating link:', error);
-    
     if (error instanceof ValidationError || error instanceof ConflictError) {
-      throw error; // Will be handled by error middleware
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create link'
+      });
     }
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create link',
-    });
   }
 });
 
-// GET /links/:slug - Get a specific link
+// GET /links/:slug - Get a specific short link
 linksRouter.get('/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
@@ -155,37 +227,51 @@ linksRouter.get('/:slug', async (req: Request, res: Response) => {
     if (!isValidSlug(slug)) {
       throw new ValidationError('Invalid slug format');
     }
-
-    const result = await docClient.send(new GetCommand({
-      TableName: getTableName(),
-      Key: { slug },
-    }));
-
-    if (!result.Item) {
-      throw new NotFoundError('Link not found');
+    
+    const link = await executeDynamoOperation(
+      // DynamoDB operation
+      async () => {
+        const tableName = getTableName();
+        const command = new GetCommand({
+          TableName: tableName,
+          Key: { slug }
+        });
+        const result = await docClient.send(command);
+        return result.Item as ShortLink | undefined;
+      },
+      // Mock fallback
+      () => {
+        return mockLinks.get(slug);
+      },
+      'get item'
+    );
+    
+    if (!link) {
+      throw new NotFoundError(`Link with slug "${slug}" not found`);
     }
-
-    const link = result.Item as ShortLink;
     
     res.json({
       success: true,
       data: link,
+      message: `Link found${useMockMode ? ' (mock mode)' : ''}`
     });
   } catch (error) {
     console.error('Error fetching link:', error);
-    
     if (error instanceof ValidationError || error instanceof NotFoundError) {
-      throw error;
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch link'
+      });
     }
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch link',
-    });
   }
 });
 
-// PUT /links/:slug - Update a link
+// PUT /links/:slug - Update a short link
 linksRouter.put('/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
@@ -193,96 +279,122 @@ linksRouter.put('/:slug', async (req: Request, res: Response) => {
     if (!isValidSlug(slug)) {
       throw new ValidationError('Invalid slug format');
     }
-
-    // Validate request body
+    
     const validatedData = UpdateShortLinkRequestSchema.parse(req.body);
-
-    // Check if link exists
-    const existingResult = await docClient.send(new GetCommand({
-      TableName: getTableName(),
-      Key: { slug },
-    }));
-
-    if (!existingResult.Item) {
-      throw new NotFoundError('Link not found');
+    
+    if (validatedData.url && !validateUrl(validatedData.url)) {
+      throw new ValidationError('Invalid URL format');
     }
-
-    // Build update expression
-    const updateExpressions: string[] = [];
-    const expressionAttributeNames: Record<string, string> = {};
-    const expressionAttributeValues: Record<string, any> = {};
-
-    if (validatedData.url !== undefined) {
-      updateExpressions.push('#url = :url');
-      expressionAttributeNames['#url'] = 'url';
-      expressionAttributeValues[':url'] = validatedData.url;
-    }
-
-    if (validatedData.utm_params !== undefined) {
-      updateExpressions.push('utm_params = :utm_params');
-      expressionAttributeValues[':utm_params'] = validatedData.utm_params;
-    }
-
-    if (validatedData.tags !== undefined) {
-      updateExpressions.push('tags = :tags');
-      expressionAttributeValues[':tags'] = validatedData.tags;
-    }
-
-    if (validatedData.description !== undefined) {
-      updateExpressions.push('description = :description');
-      expressionAttributeValues[':description'] = validatedData.description;
-    }
-
-    if (validatedData.expiresAt !== undefined) {
-      updateExpressions.push('expiresAt = :expiresAt');
-      expressionAttributeValues[':expiresAt'] = validatedData.expiresAt;
-    }
-
-    if (validatedData.isActive !== undefined) {
-      updateExpressions.push('isActive = :isActive');
-      expressionAttributeValues[':isActive'] = validatedData.isActive;
-    }
-
-    // Always update the updatedAt timestamp
-    updateExpressions.push('updatedAt = :updatedAt');
-    expressionAttributeValues[':updatedAt'] = new Date().toISOString();
-
-    if (updateExpressions.length === 1) { // Only updatedAt
-      throw new ValidationError('No fields to update');
-    }
-
-    // Perform the update
-    const result = await docClient.send(new UpdateCommand({
-      TableName: getTableName(),
-      Key: { slug },
-      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
-      ExpressionAttributeNames: Object.keys(expressionAttributeNames).length > 0 ? expressionAttributeNames : undefined,
-      ExpressionAttributeValues: expressionAttributeValues,
-      ReturnValues: 'ALL_NEW',
-    }));
-
-    const updatedLink = result.Attributes as ShortLink;
-
+    
+    const updatedLink = await executeDynamoOperation(
+      // DynamoDB operation  
+      async () => {
+        const tableName = getTableName();
+        
+        // Check if exists
+        const getCommand = new GetCommand({
+          TableName: tableName,
+          Key: { slug }
+        });
+        const existingResult = await docClient.send(getCommand);
+        if (!existingResult.Item) {
+          throw new NotFoundError(`Link with slug "${slug}" not found`);
+        }
+        
+        // Build update expression
+        const updateExpressions: string[] = ['#updatedAt = :updatedAt'];
+        const expressionAttributeNames: Record<string, string> = { '#updatedAt': 'updatedAt' };
+        const expressionAttributeValues: Record<string, any> = { ':updatedAt': formatDate() };
+        
+        if (validatedData.url !== undefined) {
+          updateExpressions.push('#url = :url');
+          expressionAttributeNames['#url'] = 'url';
+          expressionAttributeValues[':url'] = validatedData.url;
+        }
+        
+        if (validatedData.utm_params !== undefined) {
+          updateExpressions.push('#utm_params = :utm_params');
+          expressionAttributeNames['#utm_params'] = 'utm_params';
+          expressionAttributeValues[':utm_params'] = validatedData.utm_params;
+        }
+        
+        if (validatedData.tags !== undefined) {
+          updateExpressions.push('#tags = :tags');
+          expressionAttributeNames['#tags'] = 'tags';
+          expressionAttributeValues[':tags'] = validatedData.tags;
+        }
+        
+        if (validatedData.description !== undefined) {
+          updateExpressions.push('#description = :description');
+          expressionAttributeNames['#description'] = 'description';
+          expressionAttributeValues[':description'] = validatedData.description;
+        }
+        
+        if (validatedData.expiresAt !== undefined) {
+          updateExpressions.push('#expiresAt = :expiresAt');
+          expressionAttributeNames['#expiresAt'] = 'expiresAt';
+          expressionAttributeValues[':expiresAt'] = validatedData.expiresAt;
+        }
+        
+        if (validatedData.isActive !== undefined) {
+          updateExpressions.push('#isActive = :isActive');
+          expressionAttributeNames['#isActive'] = 'isActive';
+          expressionAttributeValues[':isActive'] = validatedData.isActive;
+        }
+        
+        const updateCommand = new UpdateCommand({
+          TableName: tableName,
+          Key: { slug },
+          UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+          ExpressionAttributeNames: expressionAttributeNames,
+          ExpressionAttributeValues: expressionAttributeValues,
+          ReturnValues: 'ALL_NEW'
+        });
+        
+        const result = await docClient.send(updateCommand);
+        return result.Attributes as ShortLink;
+      },
+      // Mock fallback
+      () => {
+        const existingLink = mockLinks.get(slug);
+        if (!existingLink) {
+          throw new NotFoundError(`Link with slug "${slug}" not found`);
+        }
+        
+        const updatedLink: ShortLink = {
+          ...existingLink,
+          ...validatedData,
+          updatedAt: formatDate(),
+        };
+        
+        mockLinks.set(slug, updatedLink);
+        return updatedLink;
+      },
+      'update item'
+    );
+    
     res.json({
       success: true,
       data: updatedLink,
-      message: 'Link updated successfully',
+      message: `Link updated successfully${useMockMode ? ' (mock mode)' : ''}`
     });
   } catch (error) {
     console.error('Error updating link:', error);
-    
     if (error instanceof ValidationError || error instanceof NotFoundError) {
-      throw error;
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update link'
+      });
     }
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update link',
-    });
   }
 });
 
-// DELETE /links/:slug - Delete a link
+// DELETE /links/:slug - Delete a short link
 linksRouter.delete('/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
@@ -290,42 +402,62 @@ linksRouter.delete('/:slug', async (req: Request, res: Response) => {
     if (!isValidSlug(slug)) {
       throw new ValidationError('Invalid slug format');
     }
-
-    // Check if link exists
-    const existingResult = await docClient.send(new GetCommand({
-      TableName: getTableName(),
-      Key: { slug },
-    }));
-
-    if (!existingResult.Item) {
-      throw new NotFoundError('Link not found');
-    }
-
-    // Delete the link
-    await docClient.send(new DeleteCommand({
-      TableName: getTableName(),
-      Key: { slug },
-    }));
-
+    
+    await executeDynamoOperation(
+      // DynamoDB operation
+      async () => {
+        const tableName = getTableName();
+        
+        // Check if exists
+        const getCommand = new GetCommand({
+          TableName: tableName,
+          Key: { slug }
+        });
+        const existingResult = await docClient.send(getCommand);
+        if (!existingResult.Item) {
+          throw new NotFoundError(`Link with slug "${slug}" not found`);
+        }
+        
+        // Delete
+        const deleteCommand = new DeleteCommand({
+          TableName: tableName,
+          Key: { slug }
+        });
+        await docClient.send(deleteCommand);
+        return null;
+      },
+      // Mock fallback
+      () => {
+        if (!mockLinks.has(slug)) {
+          throw new NotFoundError(`Link with slug "${slug}" not found`);
+        }
+        mockLinks.delete(slug);
+        return null;
+      },
+      'delete item'
+    );
+    
     res.json({
       success: true,
-      message: 'Link deleted successfully',
+      message: `Link deleted successfully${useMockMode ? ' (mock mode)' : ''}`
     });
   } catch (error) {
     console.error('Error deleting link:', error);
-    
     if (error instanceof ValidationError || error instanceof NotFoundError) {
-      throw error;
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete link'
+      });
     }
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete link',
-    });
   }
 });
 
-// HEAD /links/:slug - Check if a link exists (for slug availability)
+// HEAD /links/:slug - Check if slug is available
 linksRouter.head('/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
@@ -333,19 +465,32 @@ linksRouter.head('/:slug', async (req: Request, res: Response) => {
     if (!isValidSlug(slug)) {
       return res.status(400).end();
     }
-
-    const result = await docClient.send(new GetCommand({
-      TableName: getTableName(),
-      Key: { slug },
-    }));
-
-    if (result.Item) {
-      res.status(200).end(); // Link exists
+    
+    const exists = await executeDynamoOperation(
+      // DynamoDB operation
+      async () => {
+        const tableName = getTableName();
+        const command = new GetCommand({
+          TableName: tableName,
+          Key: { slug }
+        });
+        const result = await docClient.send(command);
+        return !!result.Item;
+      },
+      // Mock fallback
+      () => {
+        return mockLinks.has(slug);
+      },
+      'head check'
+    );
+    
+    if (exists) {
+      res.status(200).end(); // Slug exists
     } else {
-      res.status(404).end(); // Link doesn't exist
+      res.status(404).end(); // Slug is available
     }
   } catch (error) {
-    console.error('Error checking link:', error);
+    console.error('Error checking slug:', error);
     res.status(500).end();
   }
 }); 

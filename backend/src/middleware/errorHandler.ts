@@ -1,36 +1,50 @@
 import { Request, Response, NextFunction } from 'express';
-import { LinkPipeError, ValidationError, NotFoundError, ConflictError } from '@linkpipe/shared';
+import { ZodError } from 'zod';
+import { LinkPipeError, ValidationError, NotFoundError, ConflictError } from '../types';
 
 export function errorHandler(
-  error: Error,
+  err: Error,
   req: Request,
   res: Response,
   next: NextFunction
 ): void {
-  console.error('❌ Error:', error);
+  console.error('Error:', err);
 
-  // Handle known LinkPipe errors
-  if (error instanceof LinkPipeError) {
-    res.status(error.statusCode).json({
+  // Handle Zod validation errors
+  if (err instanceof ZodError) {
+    const validationErrors = err.errors.map(error => ({
+      field: error.path.join('.'),
+      message: error.message,
+    }));
+
+    res.status(400).json({
       success: false,
-      error: error.message,
-      code: error.code,
+      error: 'Validation failed',
+      details: validationErrors,
     });
     return;
   }
 
-  // Handle validation errors
-  if (error.name === 'ZodError') {
-    res.status(400).json({
+  // Handle custom LinkPipe errors
+  if (err instanceof LinkPipeError) {
+    res.status(err.statusCode).json({
       success: false,
-      error: 'Validation failed',
-      details: error.message,
+      error: err.message,
+      code: err.code,
     });
     return;
   }
 
   // Handle AWS SDK errors
-  if (error.name === 'ConditionalCheckFailedException') {
+  if (err.name === 'ResourceNotFoundException') {
+    res.status(404).json({
+      success: false,
+      error: 'Resource not found',
+    });
+    return;
+  }
+
+  if (err.name === 'ConditionalCheckFailedException') {
     res.status(409).json({
       success: false,
       error: 'Resource already exists',
@@ -38,10 +52,10 @@ export function errorHandler(
     return;
   }
 
-  if (error.name === 'ResourceNotFoundException') {
-    res.status(404).json({
+  if (err.name === 'ValidationException') {
+    res.status(400).json({
       success: false,
-      error: 'Resource not found',
+      error: 'Invalid request data',
     });
     return;
   }
@@ -50,6 +64,9 @@ export function errorHandler(
   res.status(500).json({
     success: false,
     error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    ...(process.env.NODE_ENV === 'development' && { 
+      details: err.message,
+      stack: err.stack 
+    }),
   });
 } 

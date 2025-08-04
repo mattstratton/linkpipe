@@ -11,9 +11,13 @@ import { errorHandler } from './middleware/errorHandler'
 const app = express()
 const port = process.env.PORT || 8000
 
-// DynamoDB setup
+// DynamoDB setup with proper timeouts
 const dynamoClient = new DynamoDBClient({
   region: process.env.AWS_REGION || 'us-east-1',
+  requestHandler: {
+    requestTimeout: 5000, // 5 second timeout
+    httpsAgent: undefined,
+  },
   ...(process.env.DYNAMODB_ENDPOINT && {
     endpoint: process.env.DYNAMODB_ENDPOINT,
     credentials: {
@@ -26,77 +30,89 @@ const dynamoClient = new DynamoDBClient({
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
     removeUndefinedValues: true,
-    convertEmptyValues: true,
+    convertEmptyValues: false,
   },
 })
 
-// Set the DynamoDB client for routes
+// Set up the document client for routes
 setDocClient(docClient)
 
 // Middleware
-app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-}))
+app.use(helmet())
 app.use(cors({
-  origin: process.env.NODE_ENV === 'development' 
-    ? ['http://localhost:3000', 'http://localhost:5173']
-    : true,
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:3000',
+    process.env.FRONTEND_URL?.replace('3000', '3003') || 'http://localhost:3003',
+    'http://localhost:3000',
+    'http://localhost:3003',
+  ],
   credentials: true,
 }))
 app.use(morgan('combined'))
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    version: '1.0.0'
+// Routes
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'LinkPipe API is running',
+    version: '1.0.0',
+    endpoints: {
+      links: '/links',
+      health: '/health',
+    },
   })
 })
 
-// API routes
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    service: 'linkpipe-api',
+  })
+})
+
 app.use('/links', linksRouter)
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found',
-    message: `Cannot ${req.method} ${req.originalUrl}`,
-  })
-})
-
-// Error handler
+// Error handling middleware (must be last)
 app.use(errorHandler)
 
-// Initialize tables and start server
-async function startServer() {
+// Initialize DynamoDB tables in background (non-blocking)
+async function initializeDynamoDB() {
   try {
     console.log('🔧 Initializing DynamoDB tables...')
     await createTables(dynamoClient)
-    
-    app.listen(port, () => {
-      console.log(`🚀 LinkPipe API server running on port ${port}`)
-      console.log(`📊 Health check: http://localhost:${port}/health`)
-      console.log(`🔗 API base: http://localhost:${port}`)
-    })
+    console.log('✅ DynamoDB initialization complete')
   } catch (error) {
-    console.error('❌ Failed to start server:', error)
-    process.exit(1)
+    console.error('❌ DynamoDB initialization failed:', error)
+    console.warn('⚠️ API will still work, but database operations may fail')
   }
 }
 
-// Handle graceful shutdown
+// Start server immediately
+const server = app.listen(port, () => {
+  console.log(`🚀 LinkPipe API server running on port ${port}`)
+  console.log(`📊 Health check: http://localhost:${port}/health`)
+  console.log(`🔗 API endpoints: http://localhost:${port}/links`)
+  
+  // Initialize DynamoDB in background after server starts
+  initializeDynamoDB()
+})
+
+// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully')
-  process.exit(0)
+  server.close(() => {
+    console.log('✅ Process terminated')
+    process.exit(0)
+  })
 })
 
 process.on('SIGINT', () => {
   console.log('🛑 SIGINT received, shutting down gracefully')
-  process.exit(0)
-})
-
-startServer() 
+  server.close(() => {
+    console.log('✅ Process terminated')
+    process.exit(0)
+  })
+}) 

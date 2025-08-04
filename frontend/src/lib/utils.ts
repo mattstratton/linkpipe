@@ -1,8 +1,5 @@
-import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+export function cn(...inputs: (string | undefined | null | boolean)[]): string {
+  return inputs.filter(Boolean).join(' ')
 }
 
 export function copyToClipboard(text: string): Promise<void> {
@@ -40,13 +37,13 @@ export function formatDate(dateString: string): string {
 }
 
 export function getBaseUrl(): string {
-  const redirectUrl = import.meta.env.VITE_REDIRECT_URL
+  const redirectUrl = import.meta.env?.VITE_REDIRECT_URL
   if (redirectUrl) {
     return redirectUrl
   }
   
   // Fallback to current domain in production
-  if (import.meta.env.PROD) {
+  if (import.meta.env?.PROD) {
     return `${window.location.protocol}//${window.location.host}`
   }
   
@@ -54,7 +51,7 @@ export function getBaseUrl(): string {
 }
 
 export function buildShortUrl(slug: string): string {
-  return `${getBaseUrl()}/r/${slug}`
+  return `${getBaseUrl()}/${slug}`
 }
 
 export function validateUrl(url: string): boolean {
@@ -70,9 +67,9 @@ export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout
+  let timeout: number
   return (...args: Parameters<T>) => {
     clearTimeout(timeout)
-    timeout = setTimeout(() => func(...args), wait)
+    timeout = window.setTimeout(() => func(...args), wait)
   }
 } 

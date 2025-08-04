@@ -1,111 +1,114 @@
-import axios from 'axios'
-import type { 
-  CreateShortLinkRequest, 
-  UpdateShortLinkRequest,
-  ShortLink,
-  ApiResponse 
-} from '@shared/types'
+const API_BASE_URL = import.meta.env?.VITE_API_URL || '/api'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
+// Simplified types for now
+interface UtmParams {
+  utm_source?: string
+  utm_medium?: string
+  utm_campaign?: string
+  utm_term?: string
+  utm_content?: string
+}
 
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
+interface CreateShortLinkRequest {
+  url: string
+  slug?: string
+  utm_params?: UtmParams
+  tags?: string[]
+  description?: string
+  expiresAt?: string
+}
 
-// Request interceptor
-api.interceptors.request.use((config) => {
-  // Add auth token if available
-  const token = localStorage.getItem('linkpipe_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+interface ShortLink {
+  slug: string
+  url: string
+  utm_params?: UtmParams
+  createdAt: string
+  updatedAt?: string
+  tags?: string[]
+  description?: string
+  expiresAt?: string
+  isActive: boolean
+}
+
+interface ApiResponse<T = any> {
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
+}
+
+async function apiRequest<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`
+  
+  const response = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    ...options,
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`)
   }
-  return config
-})
 
-// Response interceptor
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('linkpipe_token')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
+  const data: ApiResponse<T> = await response.json()
+  
+  if (!data.success) {
+    throw new Error(data.error || 'API request failed')
   }
-)
+
+  return data.data!
+}
 
 export const linkApi = {
   // Create a new short link
   create: async (data: CreateShortLinkRequest): Promise<ShortLink> => {
-    const response = await api.post<ApiResponse<ShortLink>>('/links', data)
-    if (!response.data.success) {
-      throw new Error(response.data.error || 'Failed to create link')
-    }
-    return response.data.data!
+    return apiRequest<ShortLink>('/links', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
   },
 
   // Get all links
   getAll: async (): Promise<ShortLink[]> => {
-    const response = await api.get<ApiResponse<ShortLink[]>>('/links')
-    if (!response.data.success) {
-      throw new Error(response.data.error || 'Failed to fetch links')
-    }
-    return response.data.data!
+    return apiRequest<ShortLink[]>('/links')
   },
 
   // Get a specific link by slug
   getBySlug: async (slug: string): Promise<ShortLink> => {
-    const response = await api.get<ApiResponse<ShortLink>>(`/links/${slug}`)
-    if (!response.data.success) {
-      throw new Error(response.data.error || 'Failed to fetch link')
-    }
-    return response.data.data!
+    return apiRequest<ShortLink>(`/links/${slug}`)
   },
 
   // Update a link
-  update: async (slug: string, data: UpdateShortLinkRequest): Promise<ShortLink> => {
-    const response = await api.put<ApiResponse<ShortLink>>(`/links/${slug}`, data)
-    if (!response.data.success) {
-      throw new Error(response.data.error || 'Failed to update link')
-    }
-    return response.data.data!
+  update: async (slug: string, data: Partial<CreateShortLinkRequest>): Promise<ShortLink> => {
+    return apiRequest<ShortLink>(`/links/${slug}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
   },
 
   // Delete a link
   delete: async (slug: string): Promise<void> => {
-    const response = await api.delete<ApiResponse>(`/links/${slug}`)
-    if (!response.data.success) {
-      throw new Error(response.data.error || 'Failed to delete link')
-    }
+    return apiRequest<void>(`/links/${slug}`, {
+      method: 'DELETE',
+    })
   },
 
   // Check if slug is available
   checkSlug: async (slug: string): Promise<boolean> => {
     try {
-      await api.head(`/links/${slug}`)
-      return false // Slug exists
+      const response = await fetch(`${API_BASE_URL}/links/${slug}`, {
+        method: 'HEAD',
+      })
+      return response.status === 404 // Available if not found
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        return true // Slug is available
-      }
-      throw error
+      return true // Assume available on error
     }
   },
 }
 
-export const redirectApi = {
-  // Get redirect URL (for testing purposes)
-  getRedirectUrl: async (slug: string): Promise<string> => {
-    const redirectBaseUrl = import.meta.env.VITE_REDIRECT_URL || 'http://localhost:8001'
-    const response = await axios.get(`${redirectBaseUrl}/r/${slug}`, {
-      maxRedirects: 0,
-      validateStatus: (status) => status === 302,
-    })
-    return response.headers.location
-  },
-}
-
-export default api 
+export type { CreateShortLinkRequest, ShortLink, UtmParams } 
