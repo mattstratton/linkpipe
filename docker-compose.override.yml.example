@@ -1,0 +1,29 @@
+# Copy this file to docker-compose.override.yml to customize your local development setup
+# This file will be ignored by git and allows you to override any service configuration
+
+version: '3.8'
+
+services:
+  frontend:
+    # Override port if you have conflicts
+    ports:
+      - "3001:3000"  # Change 3001 to any available port
+    # Add custom environment variables
+    environment:
+      - CUSTOM_VAR=value
+
+  backend:
+    # Override port if you have conflicts
+    ports:
+      - "8001:8000"  # Change 8001 to any available port
+    # Add custom environment variables or volumes
+    volumes:
+      - ./custom-config:/app/config
+
+  # Add additional services for your development needs
+  # redis:
+  #   image: redis:alpine
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - linkpipe-network 

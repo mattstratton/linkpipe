@@ -1,0 +1,31 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies for building native modules
+RUN apk add --no-cache python3 make g++
+
+# Copy workspace package.json first
+COPY package*.json ./
+
+# Copy workspace packages
+COPY shared/package*.json ./shared/
+COPY backend/package*.json ./backend/
+
+# Install workspace dependencies first
+RUN npm install --ignore-scripts
+
+# Copy shared module source
+COPY shared/ ./shared/
+
+# Copy backend source
+COPY backend/ ./backend/
+
+# Set working directory to backend
+WORKDIR /app/backend
+
+# Expose port
+EXPOSE 8000
+
+# Start development server
+CMD ["npm", "run", "dev"] 
