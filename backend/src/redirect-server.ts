@@ -2,9 +2,9 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
+import { prismaDb } from './lib/prisma'
 import { redirectRouter } from './routes/redirect'
 import { errorHandler } from './middleware/errorHandler'
-import { db } from './lib/database'
 
 const app = express()
 const port = process.env.PORT || 8001
@@ -78,7 +78,7 @@ const server = app.listen(port, () => {
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully')
   server.close(async () => {
-    await db.close()
+    await prismaDb.close()
     console.log('✅ Process terminated')
     process.exit(0)
   })
@@ -87,7 +87,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('🛑 SIGINT received, shutting down gracefully')
   server.close(async () => {
-    await db.close()
+    await prismaDb.close()
     console.log('✅ Process terminated')
     process.exit(0)
   })

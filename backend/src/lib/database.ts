@@ -31,7 +31,7 @@ export class Database {
         console.log(`🕒 Database time: ${result.rows[0].current_time}`);
         return;
       } catch (error) {
-        console.warn(`⚠️ PostgreSQL connection attempt ${attempt} failed:`, error.message);
+        console.warn(`⚠️ PostgreSQL connection attempt ${attempt} failed:`, (error as Error).message);
         
         if (attempt === maxRetries) {
           console.error('❌ PostgreSQL connection failed after all retries');
@@ -47,6 +47,7 @@ export class Database {
   async createLink(data: {
     slug: string;
     url: string;
+    domain?: string;
     utm_params?: UtmParams;
     description?: string;
     tags?: string[];
@@ -56,15 +57,16 @@ export class Database {
     try {
       const query = `
         INSERT INTO links (
-          slug, url, utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+          slug, url, domain, utm_source, utm_medium, utm_campaign, utm_term, utm_content,
           description, tags, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *
       `;
       
       const values = [
         data.slug,
         data.url,
+        data.domain || 'localhost:8001',
         data.utm_params?.utm_source || null,
         data.utm_params?.utm_medium || null,
         data.utm_params?.utm_campaign || null,
@@ -120,8 +122,19 @@ export class Database {
     }
   }
 
+  async incrementClickCount(slug: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      const query = 'UPDATE links SET click_count = click_count + 1 WHERE slug = $1 AND is_active = true';
+      await client.query(query, [slug]);
+    } finally {
+      client.release();
+    }
+  }
+
   async updateLink(slug: string, data: {
     url?: string;
+    domain?: string;
     utm_params?: UtmParams;
     description?: string;
     tags?: string[];
@@ -137,6 +150,10 @@ export class Database {
       if (data.url !== undefined) {
         fields.push(`url = $${paramCount++}`);
         values.push(data.url);
+      }
+      if (data.domain !== undefined) {
+        fields.push(`domain = $${paramCount++}`);
+        values.push(data.domain);
       }
       if (data.utm_params !== undefined) {
         fields.push(`utm_source = $${paramCount++}`);
@@ -199,7 +216,7 @@ export class Database {
     try {
       const query = 'UPDATE links SET is_active = false WHERE slug = $1';
       const result = await client.query(query, [slug]);
-      return result.rowCount > 0;
+      return (result.rowCount || 0) > 0;
     } finally {
       client.release();
     }
@@ -227,6 +244,7 @@ export class Database {
     return {
       slug: row.slug,
       url: row.url,
+      domain: row.domain,
       utm_params: Object.keys(utm_params).length > 0 ? utm_params : undefined,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at?.toISOString(),
@@ -234,7 +252,63 @@ export class Database {
       expiresAt: row.expires_at?.toISOString(),
       description: row.description,
       isActive: row.is_active,
+      clickCount: row.click_count || 0,
     };
+  }
+
+  async getSetting(key: string): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      const query = 'SELECT value FROM settings WHERE key = $1';
+      const result = await client.query(query, [key]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      return result.rows[0].value;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getAllSettings(): Promise<Record<string, any>> {
+    const client = await this.pool.connect();
+    try {
+      const query = 'SELECT key, value, description FROM settings ORDER BY key';
+      const result = await client.query(query);
+      
+      const settings: Record<string, any> = {};
+      for (const row of result.rows) {
+        settings[row.key] = {
+          value: row.value,
+          description: row.description
+        };
+      }
+      
+      return settings;
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateSetting(key: string, value: any, description?: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      const query = `
+        INSERT INTO settings (key, value, description)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (key) 
+        DO UPDATE SET 
+          value = EXCLUDED.value,
+          description = COALESCE(EXCLUDED.description, settings.description),
+          updated_at = NOW()
+      `;
+      
+      await client.query(query, [key, JSON.stringify(value), description]);
+    } finally {
+      client.release();
+    }
   }
 
   async close(): Promise<void> {

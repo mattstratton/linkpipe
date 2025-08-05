@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env?.VITE_API_URL || '/api'
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api'
 
 // Simplified types for now
 interface UtmParams {
@@ -12,6 +12,7 @@ interface UtmParams {
 interface CreateShortLinkRequest {
   url: string
   slug?: string
+  domain?: string
   utm_params?: UtmParams
   tags?: string[]
   description?: string
@@ -21,6 +22,7 @@ interface CreateShortLinkRequest {
 interface ShortLink {
   slug: string
   url: string
+  domain: string
   utm_params?: UtmParams
   createdAt: string
   updatedAt?: string
@@ -28,6 +30,7 @@ interface ShortLink {
   description?: string
   expiresAt?: string
   isActive: boolean
+  clickCount: number
 }
 
 interface ApiResponse<T = any> {
@@ -52,7 +55,30 @@ async function apiRequest<T>(
   })
 
   if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`)
+    // Try to extract error message from response
+    let errorMessage = `HTTP error! status: ${response.status}`
+    
+    try {
+      const errorData = await response.json()
+      if (errorData.error) {
+        errorMessage = errorData.error
+      } else if (errorData.message) {
+        errorMessage = errorData.message
+      }
+    } catch {
+      // If we can't parse the response, use a more specific error message
+      if (response.status === 409) {
+        errorMessage = 'This custom slug is already taken. Please try a different one.'
+      } else if (response.status === 400) {
+        errorMessage = 'Invalid request. Please check your input and try again.'
+      } else if (response.status === 404) {
+        errorMessage = 'The requested resource was not found.'
+      } else if (response.status === 500) {
+        errorMessage = 'Server error. Please try again later.'
+      }
+    }
+    
+    throw new Error(errorMessage)
   }
 
   const data: ApiResponse<T> = await response.json()
@@ -111,4 +137,57 @@ export const linkApi = {
   },
 }
 
-export type { CreateShortLinkRequest, ShortLink, UtmParams } 
+// Settings API
+interface Settings {
+  domains: string[]
+  utm_sources: string[]
+  utm_mediums: string[]
+  utm_campaigns: string[]
+  utm_contents: string[]
+}
+
+export const settingsApi = {
+  // Get all settings
+  getAll: async (): Promise<Settings> => {
+    const response = await apiRequest<Record<string, { value: any; description: string }>>('/settings')
+    
+    // Transform the response to a more usable format
+    const settings: Settings = {
+      domains: response.domains?.value || [],
+      utm_sources: response.utm_sources?.value || [],
+      utm_mediums: response.utm_mediums?.value || [],
+      utm_campaigns: response.utm_campaigns?.value || [],
+      utm_contents: response.utm_contents?.value || [],
+    }
+    
+    return settings
+  },
+
+  // Update multiple settings
+  updateAll: async (settings: Partial<Settings>): Promise<void> => {
+    const requestData: Record<string, { value: any }> = {}
+    
+    if (settings.domains) {
+      requestData.domains = { value: settings.domains }
+    }
+    if (settings.utm_sources) {
+      requestData.utm_sources = { value: settings.utm_sources }
+    }
+    if (settings.utm_mediums) {
+      requestData.utm_mediums = { value: settings.utm_mediums }
+    }
+    if (settings.utm_campaigns) {
+      requestData.utm_campaigns = { value: settings.utm_campaigns }
+    }
+    if (settings.utm_contents) {
+      requestData.utm_contents = { value: settings.utm_contents }
+    }
+    
+    return apiRequest<void>('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(requestData),
+    })
+  },
+}
+
+export type { CreateShortLinkRequest, ShortLink, UtmParams, Settings } 

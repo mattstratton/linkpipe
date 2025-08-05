@@ -7,7 +7,7 @@ export const UtmParamsSchema = z.object({
   utm_campaign: z.string().optional(),
   utm_term: z.string().optional(),
   utm_content: z.string().optional(),
-}).strict();
+});
 
 export type UtmParams = z.infer<typeof UtmParamsSchema>;
 
@@ -15,6 +15,7 @@ export type UtmParams = z.infer<typeof UtmParamsSchema>;
 export const ShortLinkSchema = z.object({
   slug: z.string().min(1).max(50),
   url: z.string().url(),
+  domain: z.string().optional(),
   utm_params: UtmParamsSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime().optional(),
@@ -22,6 +23,7 @@ export const ShortLinkSchema = z.object({
   expiresAt: z.string().datetime().optional(),
   description: z.string().optional(),
   isActive: z.boolean().default(true),
+  clickCount: z.number().default(0),
 });
 
 export type ShortLink = z.infer<typeof ShortLinkSchema>;
@@ -30,6 +32,7 @@ export type ShortLink = z.infer<typeof ShortLinkSchema>;
 export const CreateShortLinkRequestSchema = z.object({
   url: z.string().url(),
   slug: z.string().min(1).max(50).optional(),
+  domain: z.string().optional(),
   utm_params: UtmParamsSchema.optional(),
   tags: z.array(z.string()).optional(),
   description: z.string().optional(),
@@ -40,6 +43,7 @@ export type CreateShortLinkRequest = z.infer<typeof CreateShortLinkRequestSchema
 
 export const UpdateShortLinkRequestSchema = z.object({
   url: z.string().url().optional(),
+  domain: z.string().optional(),
   utm_params: UtmParamsSchema.optional(),
   tags: z.array(z.string()).optional(),
   description: z.string().optional(),

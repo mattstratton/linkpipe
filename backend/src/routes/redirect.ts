@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { ShortLink } from '../types';
 import { appendUtmParams, isExpired, isValidSlug } from '../utils';
-import { db } from '../lib/database';
+import { prismaDb } from '../lib/prisma';
 
 // Initialize the router
 export const redirectRouter = Router();
@@ -21,7 +21,7 @@ redirectRouter.get('/:slug', async (req: Request, res: Response) => {
     }
     
     // Fetch the link from database
-    const link = await db.getLinkBySlug(slug);
+    const link = await prismaDb.getLinkBySlug(slug);
     
     if (!link) {
       return res.status(404).send(createErrorPage(
@@ -52,10 +52,18 @@ redirectRouter.get('/:slug', async (req: Request, res: Response) => {
     // Build the final URL with UTM parameters
     const finalUrl = appendUtmParams(link.url, link.utm_params);
     
-    // TODO: In the future, we could track click analytics here
-    // await trackClick(slug, req);
+    // Increment click count (async, don't wait)
+    prismaDb.incrementClickCount(slug).catch(error => {
+      console.error('Failed to increment click count for', slug, ':', error);
+    });
     
-    // Perform the redirect
+    // Perform the redirect with proper headers for referrer tracking
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
     res.redirect(302, finalUrl);
     
   } catch (error) {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LinkIcon, BarChart3, Plus, Menu } from 'lucide-react'
+import { LinkIcon, BarChart3, Plus, Settings, Menu } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 interface LayoutProps {
@@ -15,6 +15,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Home', href: '/', icon: LinkIcon },
     { name: 'Create Link', href: '/create', icon: Plus },
     { name: 'Dashboard', href: '/dashboard', icon: BarChart3 },
+    { name: 'Settings', href: '/settings', icon: Settings },
   ]
 
   return (

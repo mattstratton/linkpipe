@@ -2,8 +2,9 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
-import { db } from './lib/database'
+import { prismaDb } from './lib/prisma'
 import { linksRouter } from './routes/links'
+import { settingsRouter } from './routes/settings'
 import { errorHandler } from './middleware/errorHandler'
 
 const app = express()
@@ -48,6 +49,7 @@ app.get('/health', (req, res) => {
 })
 
 app.use('/links', linksRouter)
+app.use('/settings', settingsRouter)
 
 // Error handling middleware (must be last)
 app.use(errorHandler)
@@ -64,7 +66,7 @@ const server = app.listen(port, () => {
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully')
   server.close(async () => {
-    await db.close()
+    await prismaDb.close()
     console.log('✅ Process terminated')
     process.exit(0)
   })
@@ -73,7 +75,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('🛑 SIGINT received, shutting down gracefully')
   server.close(async () => {
-    await db.close()
+    await prismaDb.close()
     console.log('✅ Process terminated')
     process.exit(0)
   })

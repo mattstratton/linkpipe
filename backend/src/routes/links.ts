@@ -16,7 +16,7 @@ import {
   sanitizeSlug,
   validateUrl
 } from '../utils';
-import { db } from '../lib/database';
+import { prismaDb } from '../lib/prisma';
 
 // Initialize the router
 export const linksRouter = Router();
@@ -24,7 +24,7 @@ export const linksRouter = Router();
 // GET /links - List all short links
 linksRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const links = await db.getAllLinks();
+    const links = await prismaDb.getAllLinks();
 
     res.json({
       success: true,
@@ -60,7 +60,7 @@ linksRouter.post('/', async (req: Request, res: Response) => {
       }
       
       // Check if custom slug already exists
-      const exists = await db.slugExists(slug);
+      const exists = await prismaDb.slugExists(slug);
       if (exists) {
         throw new ConflictError(`Slug "${slug}" is already taken`);
       }
@@ -73,13 +73,14 @@ linksRouter.post('/', async (req: Request, res: Response) => {
         if (attempts > 20) {
           throw new ConflictError('Unable to generate unique slug. Please try again.');
         }
-      } while (await db.slugExists(slug));
+      } while (await prismaDb.slugExists(slug));
     }
     
     // Create the link
-    const link = await db.createLink({
+    const link = await prismaDb.createLink({
       slug,
       url: validatedData.url,
+      domain: validatedData.domain,
       utm_params: validatedData.utm_params,
       description: validatedData.description,
       tags: validatedData.tags,
@@ -116,7 +117,7 @@ linksRouter.get('/:slug', async (req: Request, res: Response) => {
       throw new ValidationError('Invalid slug format');
     }
     
-    const link = await db.getLinkBySlug(slug);
+    const link = await prismaDb.getLinkBySlug(slug);
     
     if (!link) {
       throw new NotFoundError(`Link with slug "${slug}" not found`);
@@ -158,8 +159,9 @@ linksRouter.put('/:slug', async (req: Request, res: Response) => {
       throw new ValidationError('Invalid URL format');
     }
     
-    const updatedLink = await db.updateLink(slug, {
+    const updatedLink = await prismaDb.updateLink(slug, {
       url: validatedData.url,
+      domain: validatedData.domain,
       utm_params: validatedData.utm_params,
       description: validatedData.description,
       tags: validatedData.tags,
@@ -201,7 +203,7 @@ linksRouter.delete('/:slug', async (req: Request, res: Response) => {
       throw new ValidationError('Invalid slug format');
     }
     
-    const deleted = await db.deleteLink(slug);
+    const deleted = await prismaDb.deleteLink(slug);
     
     if (!deleted) {
       throw new NotFoundError(`Link with slug "${slug}" not found`);
@@ -236,7 +238,7 @@ linksRouter.head('/:slug', async (req: Request, res: Response) => {
       return res.status(400).end();
     }
     
-    const exists = await db.slugExists(slug);
+    const exists = await prismaDb.slugExists(slug);
     
     if (exists) {
       res.status(200).end(); // Slug exists

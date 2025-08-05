@@ -10,9 +10,10 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
+    "@types/node": "^20.19.9",
     "typescript": "^5.0.0"
   },
   "dependencies": {
     "zod": "^3.22.0"
   }
-} 
+}

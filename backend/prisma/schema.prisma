@@ -1,0 +1,44 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Link {
+  id          String    @id @default(uuid())
+  slug        String    @unique @db.VarChar(50)
+  url         String
+  domain      String    @default("localhost:8001") @db.VarChar(255)
+  utmSource   String?   @map("utm_source") @db.VarChar(255)
+  utmMedium   String?   @map("utm_medium") @db.VarChar(255)
+  utmCampaign String?   @map("utm_campaign") @db.VarChar(255)
+  utmTerm     String?   @map("utm_term") @db.VarChar(255)
+  utmContent  String?   @map("utm_content") @db.VarChar(255)
+  description String?
+  tags        String[]
+  isActive    Boolean   @default(true) @map("is_active")
+  clickCount  Int       @default(0) @map("click_count")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("links")
+}
+
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

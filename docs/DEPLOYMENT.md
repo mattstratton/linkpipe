@@ -4,124 +4,322 @@ This guide covers deploying LinkPipe to various platforms and configurations.
 
 ## 🌍 Deployment Strategies
 
-### Strategy 1: AWS Full Serverless (Recommended for Production)
-- **Frontend**: S3 + CloudFront
-- **API**: Lambda + API Gateway
-- **Database**: DynamoDB
-- **Cost**: ~$1-5/month
-- **Scalability**: Excellent
+### Strategy 1: Docker Production (Recommended)
+- **All Services**: Docker containers
+- **Database**: PostgreSQL in Docker or managed service
+- **Cost**: $5-50/month
+- **Scalability**: Good
+- **Ease**: High
 
-### Strategy 2: Vercel + AWS Hybrid
+### Strategy 2: Railway Full Stack
+- **Frontend**: Railway static hosting
+- **Backend**: Railway Node.js service
+- **Database**: Railway PostgreSQL
+- **Cost**: $5-20/month
+- **Scalability**: Excellent
+- **Ease**: Very High
+
+### Strategy 3: Vercel + Railway Hybrid
 - **Frontend**: Vercel
-- **API**: Lambda + API Gateway
-- **Database**: DynamoDB
-- **Cost**: ~$0-10/month
+- **Backend**: Railway Node.js service
+- **Database**: Railway PostgreSQL
+- **Cost**: $0-20/month
 - **Scalability**: Excellent
 - **Ease**: High
 
-### Strategy 3: VPS/Docker
-- **Frontend**: Nginx + Static Files
-- **API**: Docker Container
-- **Database**: Docker DynamoDB Local or AWS DynamoDB
+### Strategy 4: VPS/Docker
+- **All Services**: Docker on VPS
+- **Database**: PostgreSQL in Docker
 - **Cost**: $5-20/month
 - **Scalability**: Manual
 - **Control**: High
 
-## 🚀 AWS Full Serverless Deployment
+## 🐳 Docker Production Deployment
 
 ### Prerequisites
-- AWS CLI configured with appropriate permissions
-- Node.js 18+
-- Serverless Framework (optional)
+- Docker and Docker Compose installed
+- Domain name (optional)
+- SSL certificate (optional)
 
-### Step 1: Deploy DynamoDB Tables
+### Step 1: Create Production Docker Compose
 
-Using AWS CDK:
-```bash
-cd backend/infrastructure
-npm install
-npx cdk deploy LinkPipeStack
+Create `docker-compose.prod.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=https://api.yourdomain.com
+      - VITE_REDIRECT_URL=https://go.yourdomain.com
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://linkpipe:linkpipe@postgres:5432/linkpipe
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend/data:/app/data
+
+  redirect-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.redirect.prod
+    ports:
+      - "8001:8001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://linkpipe:linkpipe@postgres:5432/linkpipe
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=linkpipe
+      - POSTGRES_USER=linkpipe
+      - POSTGRES_PASSWORD=your-secure-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+      - redirect-service
+
+volumes:
+  postgres-data:
 ```
 
-Using CloudFormation:
-```bash
-cd backend/infrastructure
-aws cloudformation deploy \
-  --template-file cloudformation.yml \
-  --stack-name linkpipe \
-  --capabilities CAPABILITY_IAM
+### Step 2: Create Production Dockerfiles
+
+`frontend/Dockerfile.prod`:
+```dockerfile
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY frontend/package*.json ./frontend/
+RUN npm install --ignore-scripts
+
+COPY shared/ ./shared/
+COPY frontend/ ./frontend/
+WORKDIR /app/frontend
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=builder /app/frontend/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
 ```
 
-### Step 2: Deploy Lambda Functions
+`backend/Dockerfile.prod`:
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY backend/package*.json ./backend/
+RUN npm install --ignore-scripts
 
-Using Serverless Framework:
-```bash
-cd backend
-npm install
-npm run build
-serverless deploy --stage prod
+COPY shared/ ./shared/
+COPY backend/ ./backend/
+WORKDIR /app/backend
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Build the application
+RUN npm run build
+
+EXPOSE 8000
+CMD ["node", "dist/server.js"]
 ```
 
-Using AWS SAM:
-```bash
-cd backend
-npm run build
-sam build
-sam deploy --guided
+`backend/Dockerfile.redirect.prod`:
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY backend/package*.json ./backend/
+RUN npm install --ignore-scripts
+
+COPY shared/ ./shared/
+COPY backend/ ./backend/
+WORKDIR /app/backend
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Build the application
+RUN npm run build
+
+EXPOSE 8001
+CMD ["node", "dist/redirect-server.js"]
 ```
 
-### Step 3: Deploy Frontend to S3 + CloudFront
+### Step 3: Create Nginx Configuration
 
-1. **Build Frontend**
+`nginx.conf`:
+```nginx
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream frontend {
+        server frontend:80;
+    }
+
+    upstream backend {
+        server backend:8000;
+    }
+
+    upstream redirect {
+        server redirect-service:8001;
+    }
+
+    server {
+        listen 80;
+        server_name yourdomain.com www.yourdomain.com;
+        return 301 https://$server_name$request_uri;
+    }
+
+    server {
+        listen 443 ssl;
+        server_name yourdomain.com www.yourdomain.com;
+
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+        # Frontend
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # API
+        location /api/ {
+            proxy_pass http://backend/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        listen 443 ssl;
+        server_name go.yourdomain.com;
+
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+        # Redirect service
+        location / {
+            proxy_pass http://redirect;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+```
+
+### Step 4: Deploy
+
+```bash
+# Build and start production services
+docker-compose -f docker-compose.prod.yml up -d --build
+
+# Run database migrations
+docker-compose -f docker-compose.prod.yml exec backend npx prisma migrate deploy
+
+# Seed database (optional)
+docker-compose -f docker-compose.prod.yml exec backend npm run db:seed
+```
+
+## 🚂 Railway Full Stack Deployment
+
+### Step 1: Deploy Backend
+
+1. **Connect to Railway**
+   ```bash
+   # Install Railway CLI
+   npm install -g @railway/cli
+   
+   # Login to Railway
+   railway login
+   ```
+
+2. **Deploy Backend Service**
+   ```bash
+   cd backend
+   railway init
+   railway up
+   ```
+
+3. **Configure Environment Variables**
+   ```bash
+   railway variables set NODE_ENV=production
+   railway variables set DATABASE_URL=postgresql://...
+   ```
+
+4. **Deploy Database**
+   ```bash
+   # Create PostgreSQL service in Railway dashboard
+   # Or use Railway CLI
+   railway service create postgres
+   ```
+
+### Step 2: Deploy Frontend
+
+1. **Deploy to Railway Static**
    ```bash
    cd frontend
-   npm install
-   npm run build
+   railway init
+   railway up
    ```
 
-2. **Create S3 Bucket**
+2. **Configure Environment**
    ```bash
-   aws s3 mb s3://your-linkpipe-frontend
+   railway variables set VITE_API_URL=https://your-backend-url.railway.app
+   railway variables set VITE_REDIRECT_URL=https://your-redirect-url.railway.app
    ```
 
-3. **Upload Files**
-   ```bash
-   aws s3 sync dist/ s3://your-linkpipe-frontend --delete
-   ```
+## 🔷 Vercel + Railway Hybrid Deployment
 
-4. **Create CloudFront Distribution**
-   ```bash
-   # Use the provided CloudFormation template
-   aws cloudformation deploy \
-     --template-file infrastructure/frontend-cloudfront.yml \
-     --stack-name linkpipe-frontend \
-     --parameter-overrides BucketName=your-linkpipe-frontend
-   ```
-
-### Step 4: Configure Custom Domain
-
-1. **Route 53 Hosted Zone**
-   ```bash
-   aws route53 create-hosted-zone --name yourdomain.com --caller-reference $(date +%s)
-   ```
-
-2. **SSL Certificate**
-   ```bash
-   aws acm request-certificate \
-     --domain-name yourdomain.com \
-     --subject-alternative-names "*.yourdomain.com" \
-     --validation-method DNS
-   ```
-
-3. **Update CloudFront Distribution**
-   ```bash
-   # Update the distribution with your domain and certificate
-   ```
-
-## 🔷 Vercel + AWS Hybrid Deployment
-
-### Step 1: Deploy AWS Backend
-Follow AWS deployment steps 1-2 above.
+### Step 1: Deploy Backend to Railway
+Follow Railway deployment steps above.
 
 ### Step 2: Deploy Frontend to Vercel
 
@@ -134,7 +332,7 @@ Follow AWS deployment steps 1-2 above.
    ```bash
    cd frontend
    cp .env.example .env.production
-   # Update VITE_API_URL with your API Gateway URL
+   # Update VITE_API_URL with your Railway backend URL
    ```
 
 3. **Deploy**
@@ -154,195 +352,21 @@ vercel domains add yourdomain.com
 vercel domains add go.yourdomain.com  # for redirects
 ```
 
-## 🐳 Docker Production Deployment
-
-### Step 1: Create Production Docker Compose
-
-Create `docker-compose.prod.yml`:
-```yaml
-version: '3.8'
-
-services:
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "80:80"
-    environment:
-      - VITE_API_URL=https://api.yourdomain.com
-      - VITE_REDIRECT_URL=https://go.yourdomain.com
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - NODE_ENV=production
-      - AWS_REGION=us-east-1
-      - DYNAMODB_TABLE_NAME=linkpipe-urls
-    volumes:
-      - ./backend/data:/app/data
-
-  redirect-service:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.redirect
-    ports:
-      - "8001:8001"
-    environment:
-      - NODE_ENV=production
-    depends_on:
-      - backend
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - frontend
-      - backend
-      - redirect-service
-```
-
-### Step 2: Create Production Dockerfiles
-
-`frontend/Dockerfile`:
-```dockerfile
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-`backend/Dockerfile`:
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY dist ./dist
-EXPOSE 8000
-CMD ["node", "dist/server.js"]
-```
-
-### Step 3: Deploy
-```bash
-docker-compose -f docker-compose.prod.yml up -d --build
-```
-
-## 🔧 Infrastructure as Code
-
-### AWS CDK (TypeScript)
-
-`backend/infrastructure/cdk/stack.ts`:
-```typescript
-import * as cdk from 'aws-cdk-lib';
-import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-
-export class LinkPipeStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
-
-    // DynamoDB Table
-    const linksTable = new dynamodb.Table(this, 'LinksTable', {
-      tableName: 'linkpipe-urls',
-      partitionKey: { name: 'slug', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-
-    // Lambda Function
-    const apiLambda = new lambda.Function(this, 'ApiLambda', {
-      runtime: lambda.Runtime.NODEJS_18_X,
-      handler: 'index.handler',
-      code: lambda.Code.fromAsset('dist/lambda'),
-      environment: {
-        DYNAMODB_TABLE_NAME: linksTable.tableName,
-      },
-    });
-
-    linksTable.grantReadWriteData(apiLambda);
-
-    // API Gateway
-    const api = new apigateway.LambdaRestApi(this, 'LinkPipeApi', {
-      handler: apiLambda,
-      proxy: false,
-    });
-
-    const links = api.root.addResource('links');
-    links.addMethod('GET');
-    links.addMethod('POST');
-    
-    const link = links.addResource('{slug}');
-    link.addMethod('GET');
-    link.addMethod('PUT');
-    link.addMethod('DELETE');
-  }
-}
-```
-
-### Terraform
-
-`backend/infrastructure/terraform/main.tf`:
-```hcl
-provider "aws" {
-  region = var.aws_region
-}
-
-resource "aws_dynamodb_table" "links" {
-  name           = "linkpipe-urls"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "slug"
-
-  attribute {
-    name = "slug"
-    type = "S"
-  }
-
-  tags = {
-    Name = "LinkPipe URLs"
-  }
-}
-
-resource "aws_lambda_function" "api" {
-  filename         = "../dist/lambda.zip"
-  function_name    = "linkpipe-api"
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
-
-  environment {
-    variables = {
-      DYNAMODB_TABLE_NAME = aws_dynamodb_table.links.name
-    }
-  }
-}
-
-resource "aws_api_gateway_rest_api" "api" {
-  name        = "linkpipe-api"
-  description = "LinkPipe API Gateway"
-}
-```
-
 ## 🌐 Custom Domain Setup
 
-### AWS Route 53 + CloudFront
+### Cloudflare (Recommended)
+
+1. **Add Domain to Cloudflare**
+2. **Update Nameservers**
+3. **Configure DNS Records**
+   ```
+   A     @           your-server-ip
+   CNAME www         yourdomain.com
+   CNAME go          yourdomain.com
+   CNAME api         your-backend-url
+   ```
+
+### AWS Route 53
 
 1. **Create Hosted Zone**
    ```bash
@@ -356,101 +380,70 @@ resource "aws_api_gateway_rest_api" "api" {
    aws acm request-certificate \
      --domain-name yourdomain.com \
      --subject-alternative-names "*.yourdomain.com" \
-     --validation-method DNS \
-     --region us-east-1
+     --validation-method DNS
    ```
 
-3. **Create CloudFront Distribution**
-   ```yaml
-   # cloudformation template
-   AliasConfiguration:
-     Type: AWS::CloudFront::Distribution
-     Properties:
-       DistributionConfig:
-         Aliases:
-           - yourdomain.com
-           - www.yourdomain.com
-         ViewerCertificate:
-           AcmCertificateArn: !Ref SSLCertificate
-           SslSupportMethod: sni-only
-   ```
+## 📊 Database Management
 
-### Cloudflare (Alternative)
+### Prisma Migrations
 
-1. **Add Domain to Cloudflare**
-2. **Update Nameservers**
-3. **Configure DNS Records**
-   ```
-   A     @           your-server-ip
-   CNAME www         yourdomain.com
-   CNAME go          yourdomain.com
-   CNAME api         your-api-gateway-url
-   ```
+```bash
+# Generate migration
+cd backend
+npx prisma migrate dev --name add_new_feature
 
-## 📊 Monitoring & Logging
+# Deploy migrations to production
+npx prisma migrate deploy
 
-### AWS CloudWatch
+# Reset database (development only)
+npx prisma migrate reset
 
-1. **Lambda Logs**
-   ```bash
-   aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/linkpipe"
-   ```
+# Seed database
+npm run db:seed
+```
 
-2. **API Gateway Logs**
-   ```bash
-   aws logs describe-log-groups --log-group-name-prefix "API-Gateway-Execution-Logs"
-   ```
+### Database Backups
 
-### Custom Metrics
-```typescript
-// In Lambda function
-import { CloudWatch } from 'aws-sdk';
+```bash
+# Backup PostgreSQL
+docker-compose exec postgres pg_dump -U linkpipe linkpipe > backup.sql
 
-const cloudwatch = new CloudWatch();
-
-await cloudwatch.putMetricData({
-  Namespace: 'LinkPipe',
-  MetricData: [{
-    MetricName: 'LinkCreated',
-    Value: 1,
-    Unit: 'Count'
-  }]
-}).promise();
+# Restore PostgreSQL
+docker-compose exec -T postgres psql -U linkpipe linkpipe < backup.sql
 ```
 
 ## 🔒 Security Considerations
 
-### API Security
-1. **API Key Authentication**
-2. **Rate Limiting**
-3. **CORS Configuration**
-4. **Input Validation**
+### Environment Variables
+- Use strong passwords for PostgreSQL
+- Keep `.env` files out of version control
+- Use secrets management in production
 
-### Infrastructure Security
-1. **IAM Roles with Least Privilege**
-2. **VPC Configuration (if needed)**
-3. **SSL/TLS Certificates**
-4. **Security Groups**
+### SSL/TLS
+- Always use HTTPS in production
+- Configure proper SSL certificates
+- Set up automatic certificate renewal
 
-### Example IAM Policy
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:Query",
-        "dynamodb:Scan"
-      ],
-      "Resource": "arn:aws:dynamodb:*:*:table/linkpipe-*"
-    }
-  ]
-}
+### Database Security
+- Use strong database passwords
+- Restrict database access to application only
+- Regular security updates
+
+### Example Production .env
+```env
+# Production Environment
+NODE_ENV=production
+
+# Database
+DATABASE_URL=postgresql://linkpipe:strong-password@localhost:5432/linkpipe
+
+# Frontend URLs
+VITE_API_URL=https://api.yourdomain.com
+VITE_REDIRECT_URL=https://go.yourdomain.com
+
+# Security
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=very-secure-password
 ```
 
 ## 🚀 CI/CD Pipeline
@@ -469,8 +462,8 @@ jobs:
   deploy-backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: '18'
       - name: Install dependencies
@@ -481,20 +474,19 @@ jobs:
         run: |
           cd backend
           npm run build
-      - name: Deploy to AWS
+      - name: Deploy to Railway
         run: |
           cd backend
-          serverless deploy --stage prod
+          railway up
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   deploy-frontend:
     runs-on: ubuntu-latest
     needs: deploy-backend
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: '18'
       - name: Install and build
@@ -512,42 +504,61 @@ jobs:
 
 ### Common Problems
 
-1. **Lambda Cold Starts**
-   - Use Provisioned Concurrency
-   - Optimize bundle size
-   - Keep connections warm
+1. **Database Connection Issues**
+   - Check DATABASE_URL format
+   - Verify database is running
+   - Check network connectivity
 
-2. **DynamoDB Throttling**
-   - Increase provisioned capacity
-   - Use exponential backoff
-   - Optimize query patterns
+2. **Prisma Migration Issues**
+   - Run `npx prisma migrate deploy`
+   - Check database permissions
+   - Verify schema compatibility
 
 3. **CORS Issues**
-   - Configure API Gateway CORS
-   - Set proper headers in Lambda
-   - Check origin whitelist
+   - Configure proper origins in backend
+   - Check frontend API URLs
+   - Verify SSL certificates
 
-4. **Domain Issues**
-   - Verify DNS propagation
-   - Check SSL certificate status
-   - Validate domain ownership
+4. **Port Conflicts**
+   - Check if ports are already in use
+   - Update port configuration
+   - Restart services
 
 ### Debug Commands
 
 ```bash
-# Check AWS resources
-aws lambda list-functions --query 'Functions[?starts_with(FunctionName, `linkpipe`)]'
-aws dynamodb list-tables
-aws apigateway get-rest-apis
+# Check service status
+docker-compose ps
 
-# Check logs
-aws logs tail /aws/lambda/linkpipe-api --follow
+# View logs
+docker-compose logs -f
 
-# Test endpoints
-curl -X POST https://your-api.execute-api.us-east-1.amazonaws.com/prod/links \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com"}'
+# Check database connection
+docker-compose exec backend npx prisma db push
+
+# Test API endpoints
+curl -X GET https://api.yourdomain.com/health
+
+# Check SSL certificate
+openssl s_client -connect yourdomain.com:443
 ```
+
+### Performance Optimization
+
+1. **Database Optimization**
+   - Add database indexes
+   - Optimize queries
+   - Use connection pooling
+
+2. **Application Optimization**
+   - Enable compression
+   - Use CDN for static assets
+   - Implement caching
+
+3. **Infrastructure Optimization**
+   - Use load balancers
+   - Scale horizontally
+   - Monitor resource usage
 
 ---
 

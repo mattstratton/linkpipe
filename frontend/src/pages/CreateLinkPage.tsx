@@ -1,18 +1,27 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Copy, ExternalLink } from 'lucide-react'
-import { linkApi, CreateShortLinkRequest } from '../lib/api'
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { ArrowLeft, Copy, ExternalLink, Loader2 } from 'lucide-react'
+import { linkApi, settingsApi, CreateShortLinkRequest } from '../lib/api'
 import { buildShortUrl, copyToClipboard, validateUrl } from '../lib/utils'
+import SelectWithCustom from '../components/ui/SelectWithCustom'
 
 export default function CreateLinkPage() {
   const navigate = useNavigate()
-  const [isLoading, setIsLoading] = useState(false)
+  const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [createdLink, setCreatedLink] = useState<any | null>(null)
+
+  // Fetch settings for dropdown options
+  const { data: settings, isLoading: settingsLoading } = useQuery({
+    queryKey: ['settings'],
+    queryFn: settingsApi.getAll,
+  })
   
   const [formData, setFormData] = useState({
     url: '',
     slug: '',
+    domain: '',
     utm_source: '',
     utm_medium: '',
     utm_campaign: '',
@@ -22,7 +31,24 @@ export default function CreateLinkPage() {
     tags: '',
   })
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  // Create link mutation
+  const createLinkMutation = useMutation({
+    mutationFn: linkApi.create,
+    onSuccess: (link) => {
+      setCreatedLink(link)
+      setError(null)
+      // Invalidate and refetch links to update the dashboard
+      queryClient.invalidateQueries({ queryKey: ['links'] })
+    },
+    onError: (err) => {
+      const errorMessage = err instanceof Error ? err.message : 
+                          typeof err === 'string' ? err : 
+                          'Failed to create link'
+      setError(errorMessage)
+    }
+  })
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData(prev => ({
       ...prev,
@@ -32,7 +58,6 @@ export default function CreateLinkPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
     setError(null)
 
     try {
@@ -55,6 +80,10 @@ export default function CreateLinkPage() {
         requestData.slug = formData.slug.trim()
       }
 
+      if (formData.domain.trim()) {
+        requestData.domain = formData.domain.trim()
+      }
+
       // Add UTM parameters if any are provided
       const utmParams: any = {}
       if (formData.utm_source.trim()) utmParams.utm_source = formData.utm_source.trim()
@@ -75,22 +104,24 @@ export default function CreateLinkPage() {
         requestData.tags = formData.tags.split(',').map(tag => tag.trim()).filter(Boolean)
       }
 
-      // Create the link
-      const link = await linkApi.create(requestData)
-      setCreatedLink(link)
+      // Create the link using the mutation
+      createLinkMutation.mutate(requestData)
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create link')
-    } finally {
-      setIsLoading(false)
+      const errorMessage = err instanceof Error ? err.message : 
+                          typeof err === 'string' ? err : 
+                          'Failed to create link'
+      setError(errorMessage)
     }
   }
 
   const handleCopyLink = async () => {
     if (createdLink) {
       try {
-        const shortUrl = buildShortUrl(createdLink.slug)
-        await copyToClipboard(shortUrl)
+        const domain = createdLink.domain || 'localhost:8001';
+        const protocol = domain.includes('localhost') ? 'http://' : 'https://';
+        const shortUrl = `${protocol}${domain}/${createdLink.slug}`;
+        await copyToClipboard(shortUrl);
         // You could add a toast notification here
         console.log('Link copied to clipboard!')
       } catch (err) {
@@ -104,6 +135,7 @@ export default function CreateLinkPage() {
     setFormData({
       url: '',
       slug: '',
+      domain: '',
       utm_source: '',
       utm_medium: '',
       utm_campaign: '',
@@ -116,7 +148,9 @@ export default function CreateLinkPage() {
 
   // Show success screen if link was created
   if (createdLink) {
-    const shortUrl = buildShortUrl(createdLink.slug)
+    const domain = createdLink.domain || 'localhost:8001';
+    const protocol = domain.includes('localhost') ? 'http://' : 'https://';
+    const shortUrl = `${protocol}${domain}/${createdLink.slug}`;
     
     return (
       <div className="max-w-2xl mx-auto">
@@ -213,7 +247,31 @@ export default function CreateLinkPage() {
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-          <p className="text-red-600">{error}</p>
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                {String(error).includes('already taken') ? 'Slug Already Exists' : 'Error Creating Link'}
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>{String(error)}</p>
+                {String(error).includes('already taken') && (
+                  <div className="mt-2">
+                    <p className="font-medium">Suggestions:</p>
+                    <ul className="list-disc list-inside mt-1 space-y-1">
+                      <li>Try adding numbers or hyphens to make it unique</li>
+                      <li>Use a different word or phrase</li>
+                      <li>Leave the slug blank to generate one automatically</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -234,8 +292,35 @@ export default function CreateLinkPage() {
                 placeholder="https://example.com/your-long-url"
                 className="input"
                 required
-                disabled={isLoading}
+                disabled={createLinkMutation.isPending}
               />
+            </div>
+
+            {/* Domain Selection */}
+            <div>
+              <label htmlFor="domain" className="block text-sm font-medium text-gray-700 mb-2">
+                Domain (optional)
+              </label>
+              {settingsLoading ? (
+                <div className="flex items-center py-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-gray-400 mr-2" />
+                  <span className="text-gray-600">Loading domains...</span>
+                </div>
+              ) : (
+                <SelectWithCustom
+                  label="Domain"
+                  id="domain"
+                  name="domain"
+                  value={formData.domain}
+                  onChange={handleInputChange}
+                  options={settings?.domains || []}
+                  placeholder="Select or enter domain"
+                  disabled={createLinkMutation.isPending}
+                />
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Leave blank to use default domain
+              </p>
             </div>
 
             {/* Custom Slug */}
@@ -244,7 +329,9 @@ export default function CreateLinkPage() {
                 Custom slug (optional)
               </label>
               <div className="flex items-center">
-                <span className="text-gray-500 text-sm mr-2">{buildShortUrl('')}</span>
+                <span className="text-gray-500 text-sm mr-2">
+                  {formData.domain || (settings?.domains?.[0] || 'localhost:8001')}/
+                </span>
                 <input
                   type="text"
                   id="slug"
@@ -253,7 +340,7 @@ export default function CreateLinkPage() {
                   onChange={handleInputChange}
                   placeholder="my-custom-link"
                   className="input flex-1"
-                  disabled={isLoading}
+                  disabled={createLinkMutation.isPending}
                 />
               </div>
               <p className="text-xs text-gray-500 mt-1">
@@ -265,87 +352,78 @@ export default function CreateLinkPage() {
             <div className="border-t pt-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">UTM Parameters</h3>
               
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="utm_source" className="block text-sm font-medium text-gray-700 mb-2">
-                    UTM Source
-                  </label>
-                  <input
-                    type="text"
-                    id="utm_source"
-                    name="utm_source"
-                    value={formData.utm_source}
-                    onChange={handleInputChange}
-                    placeholder="newsletter"
-                    className="input"
-                    disabled={isLoading}
-                  />
+              {settingsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                  <span className="ml-2 text-gray-600">Loading UTM options...</span>
                 </div>
-                
-                <div>
-                  <label htmlFor="utm_medium" className="block text-sm font-medium text-gray-700 mb-2">
-                    UTM Medium
-                  </label>
-                  <input
-                    type="text"
-                    id="utm_medium"
-                    name="utm_medium"
-                    value={formData.utm_medium}
-                    onChange={handleInputChange}
-                    placeholder="email"
-                    className="input"
-                    disabled={isLoading}
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="utm_campaign" className="block text-sm font-medium text-gray-700 mb-2">
-                    UTM Campaign
-                  </label>
-                  <input
-                    type="text"
-                    id="utm_campaign"
-                    name="utm_campaign"
-                    value={formData.utm_campaign}
-                    onChange={handleInputChange}
-                    placeholder="spring_sale"
-                    className="input"
-                    disabled={isLoading}
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="utm_term" className="block text-sm font-medium text-gray-700 mb-2">
-                    UTM Term
-                  </label>
-                  <input
-                    type="text"
-                    id="utm_term"
-                    name="utm_term"
-                    value={formData.utm_term}
-                    onChange={handleInputChange}
-                    placeholder="running shoes"
-                    className="input"
-                    disabled={isLoading}
-                  />
-                </div>
-              </div>
-              
-              <div className="mt-4">
-                <label htmlFor="utm_content" className="block text-sm font-medium text-gray-700 mb-2">
-                  UTM Content
-                </label>
-                <input
-                  type="text"
-                  id="utm_content"
-                  name="utm_content"
-                  value={formData.utm_content}
-                  onChange={handleInputChange}
-                  placeholder="header_link"
-                  className="input"
-                  disabled={isLoading}
-                />
-              </div>
+              ) : (
+                <>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <SelectWithCustom
+                      label="UTM Source"
+                      id="utm_source"
+                      name="utm_source"
+                      value={formData.utm_source}
+                      onChange={handleInputChange}
+                      options={settings?.utm_sources || []}
+                      placeholder="Select or enter UTM source"
+                      disabled={createLinkMutation.isPending}
+                    />
+                    
+                    <SelectWithCustom
+                      label="UTM Medium"
+                      id="utm_medium"
+                      name="utm_medium"
+                      value={formData.utm_medium}
+                      onChange={handleInputChange}
+                      options={settings?.utm_mediums || []}
+                      placeholder="Select or enter UTM medium"
+                      disabled={createLinkMutation.isPending}
+                    />
+                    
+                    <SelectWithCustom
+                      label="UTM Campaign"
+                      id="utm_campaign"
+                      name="utm_campaign"
+                      value={formData.utm_campaign}
+                      onChange={handleInputChange}
+                      options={settings?.utm_campaigns || []}
+                      placeholder="Select or enter UTM campaign"
+                      disabled={createLinkMutation.isPending}
+                    />
+                    
+                    <div>
+                      <label htmlFor="utm_term" className="block text-sm font-medium text-gray-700 mb-2">
+                        UTM Term
+                      </label>
+                      <input
+                        type="text"
+                        id="utm_term"
+                        name="utm_term"
+                        value={formData.utm_term}
+                        onChange={handleInputChange}
+                        placeholder="running shoes, keyword, etc."
+                        className="input"
+                        disabled={createLinkMutation.isPending}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4">
+                    <SelectWithCustom
+                      label="UTM Content"
+                      id="utm_content"
+                      name="utm_content"
+                      value={formData.utm_content}
+                      onChange={handleInputChange}
+                      options={settings?.utm_contents || []}
+                      placeholder="Select or enter UTM content"
+                      disabled={createLinkMutation.isPending}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Additional Options */}
@@ -364,7 +442,7 @@ export default function CreateLinkPage() {
                   rows={3}
                   placeholder="A brief description of this link..."
                   className="input"
-                  disabled={isLoading}
+                  disabled={createLinkMutation.isPending}
                 />
               </div>
               
@@ -380,7 +458,7 @@ export default function CreateLinkPage() {
                   onChange={handleInputChange}
                   placeholder="marketing, campaign, email"
                   className="input"
-                  disabled={isLoading}
+                  disabled={createLinkMutation.isPending}
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Separate tags with commas
@@ -392,10 +470,10 @@ export default function CreateLinkPage() {
             <div className="flex gap-4">
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={createLinkMutation.isPending}
                 className="btn btn-primary flex-1"
               >
-                {isLoading ? 'Creating...' : 'Create Short Link'}
+                {createLinkMutation.isPending ? 'Creating...' : 'Create Short Link'}
               </button>
               <Link
                 to="/"
