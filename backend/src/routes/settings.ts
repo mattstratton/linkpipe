@@ -2,9 +2,13 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prismaDb } from '../lib/prisma';
 import { ValidationError } from '../types';
+import { requireAuth } from '../middleware/auth';
 
 // Initialize the router
 export const settingsRouter = Router();
+
+// Apply authentication to all routes
+settingsRouter.use(requireAuth);
 
 // Settings validation schemas
 const UpdateSettingSchema = z.object({

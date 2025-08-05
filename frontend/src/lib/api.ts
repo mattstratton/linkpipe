@@ -40,17 +40,33 @@ interface ApiResponse<T = any> {
   message?: string
 }
 
-async function apiRequest<T>(
+// Get auth token from localStorage
+const getAuthToken = (): string | null => {
+  return localStorage.getItem('token');
+};
+
+export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
   
+  // Get auth token
+  const token = getAuthToken();
+  
+  // Prepare headers
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  });
+
+  // Add auth header if token exists
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  
   const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
     ...options,
   })
 
@@ -73,6 +89,8 @@ async function apiRequest<T>(
         errorMessage = 'Invalid request. Please check your input and try again.'
       } else if (response.status === 404) {
         errorMessage = 'The requested resource was not found.'
+      } else if (response.status === 401) {
+        errorMessage = 'Authentication required. Please log in.'
       } else if (response.status === 500) {
         errorMessage = 'Server error. Please try again later.'
       }

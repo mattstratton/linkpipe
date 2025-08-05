@@ -1,14 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { 
-  CreateShortLinkRequestSchema, 
-  UpdateShortLinkRequestSchema,
-  ShortLink,
-  ValidationError,
-  NotFoundError,
-  ConflictError,
-  CreateShortLinkRequest,
-  UpdateShortLinkRequest
-} from '../types';
+import { z } from 'zod';
+import { prismaDb } from '../lib/prisma';
+import { requireAuth } from '../middleware/auth';
+import { CreateShortLinkRequestSchema, UpdateShortLinkRequestSchema } from '@linkpipe/shared';
 import { 
   generateSlug,
   isValidSlug,
@@ -16,10 +10,20 @@ import {
   sanitizeSlug,
   validateUrl
 } from '../utils';
-import { prismaDb } from '../lib/prisma';
+import { 
+  ShortLink,
+  ValidationError,
+  NotFoundError,
+  ConflictError,
+  CreateShortLinkRequest,
+  UpdateShortLinkRequest
+} from '../types';
 
 // Initialize the router
 export const linksRouter = Router();
+
+// Apply authentication to all routes
+linksRouter.use(requireAuth);
 
 // GET /links - List all short links
 linksRouter.get('/', async (req: Request, res: Response) => {
