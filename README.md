@@ -210,7 +210,7 @@ CREATE TABLE links (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Settings table
+-- Settings table (stores domains, UTM options, etc.)
 CREATE TABLE settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   key VARCHAR(255) UNIQUE NOT NULL,
@@ -220,6 +220,27 @@ CREATE TABLE settings (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 ```
+
+### Domain Management
+
+**Important**: Custom domains are managed in the database settings table, not environment variables.
+
+```bash
+# Get available domains
+curl http://localhost:8000/settings/domains
+
+# Update domains
+curl -X PUT http://localhost:8000/settings/domains \
+  -H "Content-Type: application/json" \
+  -d '{
+    "value": ["localhost:8001", "short.example.com"],
+    "description": "Available domains for short links"
+  }'
+```
+
+The application comes with default domains seeded in the database:
+- `localhost:8001` (development)
+- `short.example.com` (example production domain)
 
 ### Prisma Management
 

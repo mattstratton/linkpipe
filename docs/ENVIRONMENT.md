@@ -82,6 +82,37 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=very-secure-password
 ```
 
+## 🌐 Domain Management
+
+**Important**: Custom domains are managed in the database settings table, not environment variables.
+
+### Managing Domains via API
+
+```bash
+# Get current domains
+curl http://localhost:8000/settings/domains
+
+# Update domains
+curl -X PUT http://localhost:8000/settings/domains \
+  -H "Content-Type: application/json" \
+  -d '{
+    "value": ["localhost:8001", "short.example.com", "go.example.com"],
+    "description": "Available domains for short links"
+  }'
+```
+
+### Managing Domains via Frontend
+
+1. Go to Settings page in the frontend
+2. Update the "domains" setting
+3. Save changes
+
+### Default Domains
+
+The application comes with default domains seeded in the database:
+- `localhost:8001` (development)
+- `short.example.com` (example production domain)
+
 ## 🐳 Docker Integration
 
 ### Docker Compose Environment
