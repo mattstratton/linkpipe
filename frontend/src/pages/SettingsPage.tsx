@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, Save, Plus, Trash2, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Settings, Save, Plus, Trash2, Loader2, AlertCircle, CheckCircle, Upload, List, Grid } from 'lucide-react';
 import { settingsApi, Settings as SettingsType } from '../lib/api';
 
 export default function SettingsPage() {
@@ -66,6 +66,19 @@ export default function SettingsPage() {
     }));
   };
 
+  // Bulk import functionality
+  const handleBulkImport = (field: keyof SettingsType, bulkText: string) => {
+    const items = bulkText
+      .split('\n')
+      .map(item => item.trim())
+      .filter(item => item.length > 0);
+    
+    setFormData(prev => ({
+      ...prev,
+      [field]: [...prev[field], ...items]
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -101,61 +114,154 @@ export default function SettingsPage() {
     );
   }
 
-  if (isLoading) {
-    return (
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-center min-h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-          <span className="ml-2 text-gray-600">Loading settings...</span>
-        </div>
-      </div>
-    );
-  }
-
   const renderArrayField = (
     title: string,
     field: keyof SettingsType,
     description: string,
     placeholder: string
-  ) => (
-    <div className="card">
-      <div className="card-header">
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <p className="text-sm text-gray-600 mt-1">{description}</p>
-      </div>
-      <div className="card-content">
-        <div className="space-y-3">
-          {formData[field].map((item, index) => (
-            <div key={index} className="flex gap-2">
-              <input
-                type="text"
-                value={item}
-                onChange={(e) => updateArrayField(field, index, e.target.value)}
-                placeholder={placeholder}
-                className="input flex-1"
-              />
+  ) => {
+    const [isBulkMode, setIsBulkMode] = useState(false);
+    const [bulkText, setBulkText] = useState('');
+
+    return (
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+              <p className="text-sm text-gray-600 mt-1">{description}</p>
+            </div>
+            <div className="flex items-center space-x-2">
               <button
                 type="button"
-                onClick={() => removeArrayItem(field, index)}
-                className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
-                title="Remove item"
+                onClick={() => setIsBulkMode(false)}
+                className={`p-2 rounded-md transition-colors ${
+                  !isBulkMode 
+                    ? 'bg-blue-100 text-blue-700' 
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                }`}
+                title="Single item mode"
               >
-                <Trash2 className="h-4 w-4" />
+                <List className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsBulkMode(true)}
+                className={`p-2 rounded-md transition-colors ${
+                  isBulkMode 
+                    ? 'bg-blue-100 text-blue-700' 
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                }`}
+                title="Bulk import mode"
+              >
+                <Upload className="h-4 w-4" />
               </button>
             </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => addArrayItem(field)}
-            className="flex items-center text-blue-600 hover:text-blue-800"
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Add {title.toLowerCase().slice(0, -1)}
-          </button>
+          </div>
+        </div>
+        <div className="p-6">
+          {isBulkMode ? (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Paste multiple {title.toLowerCase()} (one per line)
+                </label>
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder={`Enter ${title.toLowerCase()}, one per line:
+example1
+example2
+example3`}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleBulkImport(field, bulkText);
+                    setBulkText('');
+                  }}
+                  className="btn btn-primary"
+                  disabled={!bulkText.trim()}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Import {title}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkText(formData[field].join('\n'));
+                  }}
+                  className="btn btn-secondary"
+                >
+                  Load Current
+                </button>
+              </div>
+              {formData[field].length > 0 && (
+                <div className="mt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">
+                    Current {title} ({formData[field].length} items)
+                  </p>
+                  <div className="bg-gray-50 rounded-md p-3 max-h-32 overflow-y-auto">
+                    <div className="flex flex-wrap gap-2">
+                      {formData[field].map((item, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                        >
+                          {item}
+                          <button
+                            type="button"
+                            onClick={() => removeArrayItem(field, index)}
+                            className="ml-1 text-blue-600 hover:text-blue-800"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {formData[field].map((item, index) => (
+                <div key={index} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={item}
+                    onChange={(e) => updateArrayField(field, index, e.target.value)}
+                    placeholder={placeholder}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeArrayItem(field, index)}
+                    className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
+                    title="Remove item"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => addArrayItem(field)}
+                className="flex items-center text-blue-600 hover:text-blue-800 transition-colors"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Add {title.toLowerCase().slice(0, -1)}
+              </button>
+            </div>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -214,31 +320,25 @@ export default function SettingsPage() {
           'header_link, main_cta, etc.'
         )}
 
-        <div className="flex justify-end space-x-4 pt-6 border-t">
+        <div className="flex justify-end">
           <button
             type="submit"
             disabled={updateMutation.isPending}
-            className="btn btn-primary flex items-center"
+            className="btn btn-primary"
           >
             {updateMutation.isPending ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Saving...
+              </>
             ) : (
-              <Save className="h-4 w-4 mr-2" />
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Save Settings
+              </>
             )}
-            {updateMutation.isPending ? 'Saving...' : 'Save Settings'}
           </button>
         </div>
-
-        {updateMutation.error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center">
-            <AlertCircle className="h-5 w-5 text-red-600 mr-2" />
-            <span className="text-red-800">
-              {updateMutation.error instanceof Error 
-                ? updateMutation.error.message 
-                : 'Failed to save settings'}
-            </span>
-          </div>
-        )}
       </form>
     </div>
   );

@@ -1,16 +1,21 @@
-import React, { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Copy, ExternalLink, Loader2 } from 'lucide-react'
-import { linkApi, settingsApi, CreateShortLinkRequest } from '../lib/api'
+import { linkApi, settingsApi, CreateShortLinkRequest, ShortLink } from '../lib/api'
 import { buildShortUrl, copyToClipboard, validateUrl } from '../lib/utils'
 import SelectWithCustom from '../components/ui/SelectWithCustom'
 
 export default function CreateLinkPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [createdLink, setCreatedLink] = useState<any | null>(null)
+
+  // Check if we're in edit mode
+  const isEditMode = location.state?.editMode
+  const linkData = location.state?.linkData as ShortLink | undefined
 
   // Fetch settings for dropdown options
   const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -31,9 +36,29 @@ export default function CreateLinkPage() {
     tags: '',
   })
 
-  // Create link mutation
+  // Populate form with existing data if in edit mode
+  useEffect(() => {
+    if (isEditMode && linkData) {
+      setFormData({
+        url: linkData.url,
+        slug: linkData.slug,
+        domain: linkData.domain || '',
+        utm_source: linkData.utm_params?.utm_source || '',
+        utm_medium: linkData.utm_params?.utm_medium || '',
+        utm_campaign: linkData.utm_params?.utm_campaign || '',
+        utm_term: linkData.utm_params?.utm_term || '',
+        utm_content: linkData.utm_params?.utm_content || '',
+        description: linkData.description || '',
+        tags: linkData.tags?.join(', ') || '',
+      })
+    }
+  }, [isEditMode, linkData])
+
+  // Create/Update link mutation
   const createLinkMutation = useMutation({
-    mutationFn: linkApi.create,
+    mutationFn: isEditMode && linkData 
+      ? (data: CreateShortLinkRequest) => linkApi.update(linkData.slug, data)
+      : linkApi.create,
     onSuccess: (link) => {
       setCreatedLink(link)
       setError(null)
@@ -101,32 +126,20 @@ export default function CreateLinkPage() {
       }
 
       if (formData.tags.trim()) {
-        requestData.tags = formData.tags.split(',').map(tag => tag.trim()).filter(Boolean)
+        requestData.tags = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
       }
 
-      // Create the link using the mutation
-      createLinkMutation.mutate(requestData)
-      
+      // Submit the form
+      await createLinkMutation.mutateAsync(requestData)
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 
-                          typeof err === 'string' ? err : 
-                          'Failed to create link'
-      setError(errorMessage)
+      // Error is handled by the mutation
     }
   }
 
   const handleCopyLink = async () => {
     if (createdLink) {
-      try {
-        const domain = createdLink.domain || 'localhost:8001';
-        const protocol = domain.includes('localhost') ? 'http://' : 'https://';
-        const shortUrl = `${protocol}${domain}/${createdLink.slug}`;
-        await copyToClipboard(shortUrl);
-        // You could add a toast notification here
-        console.log('Link copied to clipboard!')
-      } catch (err) {
-        console.error('Failed to copy link:', err)
-      }
+      const shortUrl = buildShortUrl(createdLink.slug)
+      await copyToClipboard(shortUrl)
     }
   }
 
@@ -146,83 +159,79 @@ export default function CreateLinkPage() {
     })
   }
 
-  // Show success screen if link was created
+  // Show success state
   if (createdLink) {
-    const domain = createdLink.domain || 'localhost:8001';
-    const protocol = domain.includes('localhost') ? 'http://' : 'https://';
-    const shortUrl = `${protocol}${domain}/${createdLink.slug}`;
+    const shortUrl = buildShortUrl(createdLink.slug)
     
     return (
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
-          <Link
-            to="/"
-            className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4"
-          >
+          <Link to="/dashboard" className="inline-flex items-center text-gray-600 hover:text-gray-900">
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Home
+            Back to Dashboard
           </Link>
-          <h1 className="text-3xl font-bold text-gray-900">Link Created Successfully!</h1>
         </div>
-
-        <div className="card">
-          <div className="card-content">
-            <div className="text-center py-8">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <ExternalLink className="h-8 w-8 text-green-600" />
-              </div>
-              
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                Your short link is ready!
-              </h2>
-              
-              <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                <div className="flex items-center justify-between">
-                  <code className="text-lg font-mono text-primary-600 flex-1 text-left">
-                    {shortUrl}
-                  </code>
-                  <button
-                    onClick={handleCopyLink}
-                    className="ml-2 p-2 text-gray-400 hover:text-gray-600"
-                    title="Copy to clipboard"
-                  >
-                    <Copy className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2 text-sm text-gray-600 mb-6">
-                <p><strong>Destination:</strong> {createdLink.url}</p>
-                {createdLink.description && (
-                  <p><strong>Description:</strong> {createdLink.description}</p>
-                )}
-                {createdLink.utm_params && Object.keys(createdLink.utm_params).length > 0 && (
-                  <div>
-                    <strong>UTM Parameters:</strong>
-                    <ul className="list-disc list-inside ml-4 mt-1">
-                      {Object.entries(createdLink.utm_params).map(([key, value]) => (
-                        <li key={key}>{key}: {value}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-4 justify-center">
-                <button
-                  onClick={handleCreateAnother}
-                  className="btn btn-primary"
-                >
-                  Create Another Link
-                </button>
-                <Link
-                  to="/dashboard"
-                  className="btn btn-outline"
-                >
-                  View Dashboard
-                </Link>
-              </div>
+        
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <ExternalLink className="h-8 w-8 text-green-600" />
             </div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">
+              {isEditMode ? 'Link Updated!' : 'Link Created!'}
+            </h1>
+            <p className="text-gray-600">
+              {isEditMode ? 'Your link has been successfully updated.' : 'Your short link is ready to use.'}
+            </p>
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-700 mb-1">Short Link</p>
+                <p className="text-lg font-mono text-gray-900 break-all">{shortUrl}</p>
+              </div>
+              <button
+                onClick={handleCopyLink}
+                className="ml-4 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                title="Copy to clipboard"
+              >
+                <Copy className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4 mb-6">
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-1">Destination URL</p>
+              <a
+                href={createdLink.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-800 text-sm break-all"
+              >
+                {createdLink.url}
+              </a>
+            </div>
+            
+            {createdLink.description && (
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-1">Description</p>
+                <p className="text-sm text-gray-900">{createdLink.description}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={handleCreateAnother}
+              className="btn btn-secondary flex-1"
+            >
+              {isEditMode ? 'Edit Another Link' : 'Create Another Link'}
+            </button>
+            <Link to="/dashboard" className="btn btn-primary flex-1">
+              View All Links
+            </Link>
           </div>
         </div>
       </div>
@@ -232,258 +241,208 @@ export default function CreateLinkPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="mb-6">
-        <Link
-          to="/"
-          className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4"
-        >
+        <Link to="/dashboard" className="inline-flex items-center text-gray-600 hover:text-gray-900">
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Home
+          Back to Dashboard
         </Link>
-        <h1 className="text-3xl font-bold text-gray-900">Create Short Link</h1>
-        <p className="text-gray-600 mt-2">
-          Create a new short link with optional UTM parameters for tracking.
-        </p>
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">
-                {String(error).includes('already taken') ? 'Slug Already Exists' : 'Error Creating Link'}
-              </h3>
-              <div className="mt-2 text-sm text-red-700">
-                <p>{String(error)}</p>
-                {String(error).includes('already taken') && (
-                  <div className="mt-2">
-                    <p className="font-medium">Suggestions:</p>
-                    <ul className="list-disc list-inside mt-1 space-y-1">
-                      <li>Try adding numbers or hyphens to make it unique</li>
-                      <li>Use a different word or phrase</li>
-                      <li>Leave the slug blank to generate one automatically</li>
-                    </ul>
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h1 className="text-2xl font-bold text-gray-900">
+            {isEditMode ? 'Edit Link' : 'Create New Link'}
+          </h1>
+          <p className="text-gray-600 mt-1">
+            {isEditMode ? 'Update your short link settings.' : 'Create a new short link with custom options.'}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">Error</h3>
+                  <div className="mt-2 text-sm text-red-700">
+                    <p>{error}</p>
                   </div>
-                )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* URL Field */}
+          <div>
+            <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-2">
+              Destination URL *
+            </label>
+            <input
+              type="url"
+              id="url"
+              name="url"
+              value={formData.url}
+              onChange={handleInputChange}
+              placeholder="https://example.com"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+              required
+            />
+          </div>
+
+          {/* Slug Field */}
+          <div>
+            <label htmlFor="slug" className="block text-sm font-medium text-gray-700 mb-2">
+              Custom Slug (optional)
+            </label>
+            <input
+              type="text"
+              id="slug"
+              name="slug"
+              value={formData.slug}
+              onChange={handleInputChange}
+              placeholder="my-custom-slug"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              Leave empty to generate a random slug
+            </p>
+          </div>
+
+          {/* Domain Selection */}
+          <div>
+            <SelectWithCustom
+              id="domain"
+              name="domain"
+              value={formData.domain}
+              onChange={handleInputChange}
+              options={settings?.domains || []}
+              label="Domain"
+              placeholder="Select a domain"
+            />
+          </div>
+
+          {/* Description Field */}
+          <div>
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+              Description (optional)
+            </label>
+            <textarea
+              id="description"
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              rows={3}
+              placeholder="Brief description of this link"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+            />
+          </div>
+
+          {/* Tags Field */}
+          <div>
+            <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-2">
+              Tags (optional)
+            </label>
+            <input
+              type="text"
+              id="tags"
+              name="tags"
+              value={formData.tags}
+              onChange={handleInputChange}
+              placeholder="tag1, tag2, tag3"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              Separate tags with commas
+            </p>
+          </div>
+
+          {/* UTM Parameters Section */}
+          <div className="border-t border-gray-200 pt-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">UTM Parameters (optional)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <SelectWithCustom
+                  id="utm_source"
+                  name="utm_source"
+                  value={formData.utm_source}
+                  onChange={handleInputChange}
+                  options={settings?.utm_sources || []}
+                  label="UTM Source"
+                  placeholder="Select source"
+                />
+              </div>
+              <div>
+                <SelectWithCustom
+                  id="utm_medium"
+                  name="utm_medium"
+                  value={formData.utm_medium}
+                  onChange={handleInputChange}
+                  options={settings?.utm_mediums || []}
+                  label="UTM Medium"
+                  placeholder="Select medium"
+                />
+              </div>
+              <div>
+                <SelectWithCustom
+                  id="utm_campaign"
+                  name="utm_campaign"
+                  value={formData.utm_campaign}
+                  onChange={handleInputChange}
+                  options={settings?.utm_campaigns || []}
+                  label="UTM Campaign"
+                  placeholder="Select campaign"
+                />
+              </div>
+              <div>
+                <input
+                  type="text"
+                  id="utm_term"
+                  name="utm_term"
+                  value={formData.utm_term}
+                  onChange={handleInputChange}
+                  placeholder="UTM Term"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+              <div>
+                <SelectWithCustom
+                  id="utm_content"
+                  name="utm_content"
+                  value={formData.utm_content}
+                  onChange={handleInputChange}
+                  options={settings?.utm_contents || []}
+                  label="UTM Content"
+                  placeholder="Select content"
+                />
               </div>
             </div>
           </div>
-        </div>
-      )}
 
-      <div className="card">
-        <div className="card-content">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* URL Input */}
-            <div>
-              <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-2">
-                URL to shorten *
-              </label>
-              <input
-                type="url"
-                id="url"
-                name="url"
-                value={formData.url}
-                onChange={handleInputChange}
-                placeholder="https://example.com/your-long-url"
-                className="input"
-                required
-                disabled={createLinkMutation.isPending}
-              />
-            </div>
-
-            {/* Domain Selection */}
-            <div>
-              <label htmlFor="domain" className="block text-sm font-medium text-gray-700 mb-2">
-                Domain (optional)
-              </label>
-              {settingsLoading ? (
-                <div className="flex items-center py-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-gray-400 mr-2" />
-                  <span className="text-gray-600">Loading domains...</span>
-                </div>
-              ) : (
-                <SelectWithCustom
-                  label="Domain"
-                  id="domain"
-                  name="domain"
-                  value={formData.domain}
-                  onChange={handleInputChange}
-                  options={settings?.domains || []}
-                  placeholder="Select or enter domain"
-                  disabled={createLinkMutation.isPending}
-                />
-              )}
-              <p className="text-xs text-gray-500 mt-1">
-                Leave blank to use default domain
-              </p>
-            </div>
-
-            {/* Custom Slug */}
-            <div>
-              <label htmlFor="slug" className="block text-sm font-medium text-gray-700 mb-2">
-                Custom slug (optional)
-              </label>
-              <div className="flex items-center">
-                <span className="text-gray-500 text-sm mr-2">
-                  {formData.domain || (settings?.domains?.[0] || 'localhost:8001')}/
-                </span>
-                <input
-                  type="text"
-                  id="slug"
-                  name="slug"
-                  value={formData.slug}
-                  onChange={handleInputChange}
-                  placeholder="my-custom-link"
-                  className="input flex-1"
-                  disabled={createLinkMutation.isPending}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Leave blank to generate automatically
-              </p>
-            </div>
-
-            {/* UTM Parameters */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">UTM Parameters</h3>
-              
-              {settingsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-                  <span className="ml-2 text-gray-600">Loading UTM options...</span>
-                </div>
-              ) : (
+          {/* Submit Button */}
+          <div className="flex gap-3 pt-6">
+            <Link to="/dashboard" className="btn btn-secondary flex-1">
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={createLinkMutation.isPending}
+              className="btn btn-primary flex-1"
+            >
+              {createLinkMutation.isPending ? (
                 <>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <SelectWithCustom
-                      label="UTM Source"
-                      id="utm_source"
-                      name="utm_source"
-                      value={formData.utm_source}
-                      onChange={handleInputChange}
-                      options={settings?.utm_sources || []}
-                      placeholder="Select or enter UTM source"
-                      disabled={createLinkMutation.isPending}
-                    />
-                    
-                    <SelectWithCustom
-                      label="UTM Medium"
-                      id="utm_medium"
-                      name="utm_medium"
-                      value={formData.utm_medium}
-                      onChange={handleInputChange}
-                      options={settings?.utm_mediums || []}
-                      placeholder="Select or enter UTM medium"
-                      disabled={createLinkMutation.isPending}
-                    />
-                    
-                    <SelectWithCustom
-                      label="UTM Campaign"
-                      id="utm_campaign"
-                      name="utm_campaign"
-                      value={formData.utm_campaign}
-                      onChange={handleInputChange}
-                      options={settings?.utm_campaigns || []}
-                      placeholder="Select or enter UTM campaign"
-                      disabled={createLinkMutation.isPending}
-                    />
-                    
-                    <div>
-                      <label htmlFor="utm_term" className="block text-sm font-medium text-gray-700 mb-2">
-                        UTM Term
-                      </label>
-                      <input
-                        type="text"
-                        id="utm_term"
-                        name="utm_term"
-                        value={formData.utm_term}
-                        onChange={handleInputChange}
-                        placeholder="running shoes, keyword, etc."
-                        className="input"
-                        disabled={createLinkMutation.isPending}
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4">
-                    <SelectWithCustom
-                      label="UTM Content"
-                      id="utm_content"
-                      name="utm_content"
-                      value={formData.utm_content}
-                      onChange={handleInputChange}
-                      options={settings?.utm_contents || []}
-                      placeholder="Select or enter UTM content"
-                      disabled={createLinkMutation.isPending}
-                    />
-                  </div>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {isEditMode ? 'Updating...' : 'Creating...'}
                 </>
+              ) : (
+                isEditMode ? 'Update Link' : 'Create Link'
               )}
-            </div>
-
-            {/* Additional Options */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Additional Options</h3>
-              
-              <div>
-                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
-                  Description (optional)
-                </label>
-                <textarea
-                  id="description"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
-                  rows={3}
-                  placeholder="A brief description of this link..."
-                  className="input"
-                  disabled={createLinkMutation.isPending}
-                />
-              </div>
-              
-              <div className="mt-4">
-                <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-2">
-                  Tags (optional)
-                </label>
-                <input
-                  type="text"
-                  id="tags"
-                  name="tags"
-                  value={formData.tags}
-                  onChange={handleInputChange}
-                  placeholder="marketing, campaign, email"
-                  className="input"
-                  disabled={createLinkMutation.isPending}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Separate tags with commas
-                </p>
-              </div>
-            </div>
-
-            {/* Submit Button */}
-            <div className="flex gap-4">
-              <button
-                type="submit"
-                disabled={createLinkMutation.isPending}
-                className="btn btn-primary flex-1"
-              >
-                {createLinkMutation.isPending ? 'Creating...' : 'Create Short Link'}
-              </button>
-              <Link
-                to="/"
-                className="btn btn-outline px-6"
-              >
-                Cancel
-              </Link>
-            </div>
-          </form>
-        </div>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

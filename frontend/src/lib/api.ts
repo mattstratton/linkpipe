@@ -164,18 +164,72 @@ interface Settings {
   utm_contents: string[]
 }
 
+// Special function for settings requests that handle the response format correctly
+const settingsRequest = async (endpoint: string, options: RequestInit = {}) => {
+  const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+  const url = `${API_BASE_URL}${endpoint}`;
+  
+  // Get auth token
+  const token = localStorage.getItem('token');
+  
+  // Prepare headers
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  });
+
+  // Add auth header if token exists
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  
+  const response = await fetch(url, {
+    headers,
+    ...options,
+  });
+
+  if (!response.ok) {
+    let errorMessage = `HTTP error! status: ${response.status}`;
+    
+    try {
+      const errorData = await response.json();
+      if (errorData.error) {
+        errorMessage = errorData.error;
+      } else if (errorData.message) {
+        errorMessage = errorData.message;
+      }
+    } catch {
+      if (response.status === 401) {
+        errorMessage = 'Authentication required. Please log in.';
+      } else if (response.status === 500) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+    }
+    
+    throw new Error(errorMessage);
+  }
+
+  const data = await response.json();
+  
+  if (!data.success) {
+    throw new Error(data.error || 'Settings request failed');
+  }
+
+  return data.data;
+};
+
 export const settingsApi = {
   // Get all settings
   getAll: async (): Promise<Settings> => {
-    const response = await apiRequest<Record<string, { value: any; description: string }>>('/settings')
+    const response = await settingsRequest('/settings');
     
     // Transform the response to a more usable format
     const settings: Settings = {
-      domains: response.domains?.value || [],
-      utm_sources: response.utm_sources?.value || [],
-      utm_mediums: response.utm_mediums?.value || [],
-      utm_campaigns: response.utm_campaigns?.value || [],
-      utm_contents: response.utm_contents?.value || [],
+      domains: response.domains || [],
+      utm_sources: response.utm_sources || [],
+      utm_mediums: response.utm_mediums || [],
+      utm_campaigns: response.utm_campaigns || [],
+      utm_contents: response.utm_contents || [],
     }
     
     return settings
@@ -201,7 +255,7 @@ export const settingsApi = {
       requestData.utm_contents = { value: settings.utm_contents }
     }
     
-    return apiRequest<void>('/settings', {
+    return settingsRequest('/settings', {
       method: 'PUT',
       body: JSON.stringify(requestData),
     })
