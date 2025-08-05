@@ -1,19 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { ShortLink } from '../types';
 import { appendUtmParams, isExpired, isValidSlug } from '../utils';
-import { getTableName } from '../lib/dynamodb';
-
-// This will be imported from the redirect server file
-let docClient: DynamoDBDocumentClient;
+import { db } from '../lib/database';
 
 // Initialize the router
 export const redirectRouter = Router();
-
-// Set the DynamoDB client (called from redirect-server.ts)
-export function setDocClient(client: DynamoDBDocumentClient) {
-  docClient = client;
-}
 
 // GET /:slug - Redirect to the target URL
 redirectRouter.get('/:slug', async (req: Request, res: Response) => {
@@ -29,24 +20,16 @@ redirectRouter.get('/:slug', async (req: Request, res: Response) => {
       ));
     }
     
-    // Fetch the link from DynamoDB
-    const tableName = getTableName();
-    const command = new GetCommand({
-      TableName: tableName,
-      Key: { slug }
-    });
+    // Fetch the link from database
+    const link = await db.getLinkBySlug(slug);
     
-    const result = await docClient.send(command);
-    
-    if (!result.Item) {
+    if (!link) {
       return res.status(404).send(createErrorPage(
         'Link Not Found',
         'The requested short link does not exist or has been removed.',
         404
       ));
     }
-    
-    const link = result.Item as ShortLink;
     
     // Check if link is active
     if (!link.isActive) {
@@ -189,4 +172,4 @@ redirectRouter.get('*', (req: Request, res: Response) => {
     'The page you are looking for does not exist.',
     404
   ));
-}); 
+});

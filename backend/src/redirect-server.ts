@@ -2,35 +2,14 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
-import { redirectRouter, setDocClient } from './routes/redirect'
+import { redirectRouter } from './routes/redirect'
 import { errorHandler } from './middleware/errorHandler'
+import { db } from './lib/database'
 
 const app = express()
 const port = process.env.PORT || 8001
 
-// DynamoDB setup
-const dynamoClient = new DynamoDBClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-  ...(process.env.DYNAMODB_ENDPOINT && {
-    endpoint: process.env.DYNAMODB_ENDPOINT,
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'dummy',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'dummy',
-    },
-  }),
-})
-
-const docClient = DynamoDBDocumentClient.from(dynamoClient, {
-  marshallOptions: {
-    removeUndefinedValues: true,
-    convertEmptyValues: true,
-  },
-})
-
-// Set the DynamoDB client for routes
-setDocClient(docClient)
+// Database connection is handled by the singleton in database.ts
 
 // Middleware
 app.use(helmet({
@@ -88,8 +67,28 @@ app.use('*', (req, res) => {
 // Error handler
 app.use(errorHandler)
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`🔗 LinkPipe Redirect service running on port ${port}`)
   console.log(`📊 Health check: http://localhost:${port}/health`)
   console.log(`🔄 Redirect base: http://localhost:${port}`)
+  console.log(`🗄️  Database: PostgreSQL`)
+})
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully')
+  server.close(async () => {
+    await db.close()
+    console.log('✅ Process terminated')
+    process.exit(0)
+  })
+})
+
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT received, shutting down gracefully')
+  server.close(async () => {
+    await db.close()
+    console.log('✅ Process terminated')
+    process.exit(0)
+  })
 }) 

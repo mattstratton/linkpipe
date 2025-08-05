@@ -5,8 +5,45 @@ import {
   ResourceNotFoundException 
 } from '@aws-sdk/client-dynamodb';
 
+// Test DynamoDB connectivity with retries
+async function testConnection(client: DynamoDBClient, retries = 3): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      console.log(`🔄 Testing DynamoDB connection (attempt ${i + 1}/${retries})...`);
+      const testPromise = client.send(new DescribeTableCommand({ TableName: 'non-existent-table' }));
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout')), 5000)
+      );
+      
+      await Promise.race([testPromise, timeoutPromise]);
+      return true; // If we get here, connection is working
+    } catch (error) {
+      if (error instanceof ResourceNotFoundException) {
+        console.log(`✅ DynamoDB connection successful`);
+        return true; // ResourceNotFoundException means connection is working
+      }
+      
+      if (i === retries - 1) {
+        console.warn(`⚠️ DynamoDB connection failed after ${retries} attempts:`, error.message);
+        return false;
+      }
+      
+      console.log(`⏳ Connection attempt ${i + 1} failed, retrying in 2 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+  return false;
+}
+
 export async function createTables(client: DynamoDBClient): Promise<void> {
   const tableName = process.env.DYNAMODB_TABLE_NAME || 'linkpipe-urls';
+
+  // First test the connection
+  const isConnected = await testConnection(client);
+  if (!isConnected) {
+    console.warn(`⚠️ DynamoDB connection failed. API will use mock mode for database operations.`);
+    return;
+  }
 
   try {
     console.log(`🔍 Checking if table ${tableName} exists...`);

@@ -35,12 +35,14 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
-      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=dummy
-      - AWS_SECRET_ACCESS_KEY=dummy
+      - DATABASE_URL=postgresql://linkpipe:linkpipe@postgres:5432/linkpipe
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=linkpipe
+      - POSTGRES_USER=linkpipe
+      - POSTGRES_PASSWORD=linkpipe
     depends_on:
-      - dynamodb-local
+      - postgres
     networks:
       - linkpipe-network
 
@@ -58,45 +60,50 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
-      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=dummy
-      - AWS_SECRET_ACCESS_KEY=dummy
+      - DATABASE_URL=postgresql://linkpipe:linkpipe@postgres:5432/linkpipe
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=linkpipe
+      - POSTGRES_USER=linkpipe
+      - POSTGRES_PASSWORD=linkpipe
     depends_on:
-      - dynamodb-local
+      - postgres
     networks:
       - linkpipe-network
 
-  # DynamoDB Local for development
-  dynamodb-local:
-    image: amazon/dynamodb-local:latest
-    container_name: linkpipe-dynamodb-local
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: linkpipe-postgres
     ports:
-      - "${DYNAMODB_PORT:-8002}:8000"
-    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
-    volumes:
-      - dynamodb-data:/home/dynamodblocal/data
-    networks:
-      - linkpipe-network
-
-  # DynamoDB Admin UI (optional)
-  dynamodb-admin:
-    image: aaronshaf/dynamodb-admin:latest
-    container_name: linkpipe-dynamodb-admin
-    ports:
-      - "${DYNAMODB_ADMIN_PORT:-8003}:8001"
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
-      - DYNAMO_ENDPOINT=http://dynamodb-local:8000
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=dummy
-      - AWS_SECRET_ACCESS_KEY=dummy
+      - POSTGRES_DB=linkpipe
+      - POSTGRES_USER=linkpipe
+      - POSTGRES_PASSWORD=linkpipe
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - linkpipe-network
+
+  # pgAdmin (optional database admin UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: linkpipe-pgadmin
+    ports:
+      - "${PGADMIN_PORT:-8003}:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@linkpipe.local
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
     depends_on:
-      - dynamodb-local
+      - postgres
     networks:
       - linkpipe-network
 
 volumes:
-  dynamodb-data:
+  postgres-data:
 
 networks:
   linkpipe-network:
