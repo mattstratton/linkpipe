@@ -71,6 +71,12 @@ export class PrismaDatabase {
     return !!result;
   }
 
+  async getAllUsers(): Promise<any[]> {
+    return prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   // Session Management Methods
   async createSession(data: {
     userId: string;
@@ -154,6 +160,43 @@ export class PrismaDatabase {
     });
 
     return links.map(link => this.prismaLinkToShortLink(link));
+  }
+
+  async getLinksWithPagination(params: {
+    page: number;
+    limit: number;
+    search: string;
+    offset: number;
+  }): Promise<{ links: ShortLink[]; total: number }> {
+    const { page, limit, search, offset } = params;
+
+    // Build search conditions
+    const searchConditions = search ? {
+      OR: [
+        { slug: { contains: search, mode: 'insensitive' as any } },
+        { url: { contains: search, mode: 'insensitive' as any } },
+        { description: { contains: search, mode: 'insensitive' as any } },
+        { tags: { hasSome: [search] } },
+      ],
+    } : {};
+
+    // Get total count
+    const total = await prisma.link.count({
+      where: searchConditions,
+    });
+
+    // Get paginated results
+    const links = await prisma.link.findMany({
+      where: searchConditions,
+      orderBy: { createdAt: 'desc' },
+      skip: offset,
+      take: limit,
+    });
+
+    return {
+      links: links.map(link => this.prismaLinkToShortLink(link)),
+      total,
+    };
   }
 
   async incrementClickCount(slug: string): Promise<void> {
@@ -245,30 +288,83 @@ export class PrismaDatabase {
     });
   }
 
+  // Domain Management Methods
+  async getAllDomains(): Promise<any[]> {
+    return prisma.domain.findMany({
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getDefaultDomain(): Promise<any | null> {
+    return prisma.domain.findFirst({
+      where: { isDefault: true },
+    });
+  }
+
+  async createDomain(name: string, isDefault: boolean = false): Promise<any> {
+    return prisma.domain.create({
+      data: {
+        name,
+        isDefault,
+      },
+    });
+  }
+
+  async updateDomain(id: string, data: { name?: string; isDefault?: boolean }): Promise<any> {
+    return prisma.domain.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteDomain(id: string): Promise<boolean> {
+    const result = await prisma.domain.delete({
+      where: { id },
+    });
+    return !!result;
+  }
+
+  async setDefaultDomain(id: string): Promise<void> {
+    // First, unset any existing default
+    await this.unsetDefaultDomain();
+    
+    // Then set the new default
+    await prisma.domain.update({
+      where: { id },
+      data: { isDefault: true },
+    });
+  }
+
+  async unsetDefaultDomain(): Promise<void> {
+    await prisma.domain.updateMany({
+      where: { isDefault: true },
+      data: { isDefault: false },
+    });
+  }
+
   async close(): Promise<void> {
     await prisma.$disconnect();
   }
 
   private prismaLinkToShortLink(link: any): ShortLink {
     return {
-      id: link.id,
       slug: link.slug,
       url: link.url,
       domain: link.domain,
-      utm_params: {
-        utm_source: link.utmSource,
-        utm_medium: link.utmMedium,
-        utm_campaign: link.utmCampaign,
-        utm_term: link.utmTerm,
-        utm_content: link.utmContent,
-      },
+      utm_params: link.utmSource || link.utmMedium || link.utmCampaign || link.utmTerm || link.utmContent ? {
+        utm_source: link.utmSource || undefined,
+        utm_medium: link.utmMedium || undefined,
+        utm_campaign: link.utmCampaign || undefined,
+        utm_term: link.utmTerm || undefined,
+        utm_content: link.utmContent || undefined,
+      } : undefined,
       description: link.description,
       tags: link.tags,
       isActive: link.isActive,
       clickCount: link.clickCount,
       expiresAt: link.expiresAt?.toISOString(),
       createdAt: link.createdAt.toISOString(),
-      updatedAt: link.updatedAt.toISOString(),
+      updatedAt: link.updatedAt?.toISOString(),
     };
   }
 }

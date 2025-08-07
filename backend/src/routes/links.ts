@@ -25,14 +25,33 @@ export const linksRouter = Router();
 // Apply authentication to all routes
 linksRouter.use(requireAuth);
 
-// GET /links - List all short links
+// GET /links - List all short links with pagination and search
 linksRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const links = await prismaDb.getAllLinks();
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const search = req.query.search as string || '';
+    const offset = (page - 1) * limit;
+
+    // Get links with pagination and search
+    const { links, total } = await prismaDb.getLinksWithPagination({
+      page,
+      limit,
+      search,
+      offset
+    });
 
     res.json({
       success: true,
       data: links,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNext: page < Math.ceil(total / limit),
+        hasPrev: page > 1
+      },
       message: `Found ${links.length} links`
     });
   } catch (error) {
@@ -80,11 +99,18 @@ linksRouter.post('/', async (req: Request, res: Response) => {
       } while (await prismaDb.slugExists(slug));
     }
     
+    // Get default domain if no domain is specified
+    let domain = validatedData.domain;
+    if (!domain) {
+      const defaultDomain = await prismaDb.getDefaultDomain();
+      domain = defaultDomain?.name || 'localhost:8001';
+    }
+    
     // Create the link
     const link = await prismaDb.createLink({
       slug,
       url: validatedData.url,
-      domain: validatedData.domain,
+      domain,
       utm_params: validatedData.utm_params,
       description: validatedData.description,
       tags: validatedData.tags,

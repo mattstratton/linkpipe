@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LinkIcon, BarChart3, Plus, Settings, Menu, LogOut, User } from 'lucide-react'
+import { LinkIcon, BarChart3, Plus, Settings, Users, Menu, LogOut, User } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -19,6 +19,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Create Link', href: '/create', icon: Plus },
     { name: 'Dashboard', href: '/dashboard', icon: BarChart3 },
     { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Users', href: '/users', icon: Users },
   ]
 
   const handleLogout = () => {

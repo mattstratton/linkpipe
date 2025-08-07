@@ -20,6 +20,7 @@ interface CreateShortLinkRequest {
 }
 
 interface ShortLink {
+  id: string
   slug: string
   url: string
   domain: string
@@ -117,9 +118,74 @@ export const linkApi = {
     })
   },
 
-  // Get all links
-  getAll: async (): Promise<ShortLink[]> => {
-    return apiRequest<ShortLink[]>('/links')
+  // Get all links with pagination and search
+  getAll: async (params?: { page?: number; limit?: number; search?: string }): Promise<{
+    data: ShortLink[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasNext: boolean;
+      hasPrev: boolean;
+    };
+  }> => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.append('page', params.page.toString());
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.search) searchParams.append('search', params.search);
+    
+    const queryString = searchParams.toString();
+    const endpoint = queryString ? `/links?${queryString}` : '/links';
+    
+    const url = `${API_BASE_URL}${endpoint}`;
+    
+    // Get auth token
+    const token = getAuthToken();
+    
+    // Prepare headers
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+    });
+
+    // Add auth header if token exists
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    
+    const response = await fetch(url, {
+      headers,
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        }
+      } catch {
+        if (response.status === 401) {
+          errorMessage = 'Authentication required. Please log in.';
+        } else if (response.status === 500) {
+          errorMessage = 'Server error. Please try again later.';
+        }
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const responseData = await response.json();
+    
+    if (!responseData.success) {
+      throw new Error(responseData.error || 'API request failed');
+    }
+
+    // Return the entire response object with data and pagination
+    return responseData;
   },
 
   // Get a specific link by slug
@@ -155,9 +221,29 @@ export const linkApi = {
   },
 }
 
-// Settings API
+// Domain API
+interface Domain {
+  id: string
+  name: string
+  isDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+interface User {
+  id: string
+  email: string
+  username: string
+  name?: string
+  avatar?: string
+  provider: string
+  providerId?: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 interface Settings {
-  domains: string[]
   utm_sources: string[]
   utm_mediums: string[]
   utm_campaigns: string[]
@@ -218,6 +304,97 @@ const settingsRequest = async (endpoint: string, options: RequestInit = {}) => {
   return data.data;
 };
 
+export const domainsApi = {
+  // Get all domains
+  getAll: async (): Promise<Domain[]> => {
+    return apiRequest<Domain[]>('/domains');
+  },
+
+  // Create a new domain
+  create: async (name: string, isDefault: boolean = false): Promise<Domain> => {
+    return apiRequest<Domain>('/domains', {
+      method: 'POST',
+      body: JSON.stringify({ name, isDefault }),
+    });
+  },
+
+  // Update a domain
+  update: async (id: string, data: { name?: string; isDefault?: boolean }): Promise<Domain> => {
+    return apiRequest<Domain>(`/domains/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Delete a domain
+  delete: async (id: string): Promise<void> => {
+    return apiRequest(`/domains/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Set a domain as default
+  setDefault: async (id: string): Promise<void> => {
+    return apiRequest(`/domains/${id}/set-default`, {
+      method: 'POST',
+    });
+  },
+}
+
+export const usersApi = {
+  // Get all users
+  getAll: async (): Promise<User[]> => {
+    return apiRequest<User[]>('/users');
+  },
+
+  // Get a specific user by ID
+  getById: async (id: string): Promise<User> => {
+    return apiRequest<User>(`/users/${id}`);
+  },
+
+  // Create a new user
+  create: async (data: {
+    email: string;
+    username: string;
+    name?: string;
+    password: string;
+    isActive?: boolean;
+  }): Promise<User> => {
+    return apiRequest<User>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Update a user
+  update: async (id: string, data: {
+    email?: string;
+    username?: string;
+    name?: string;
+    isActive?: boolean;
+  }): Promise<User> => {
+    return apiRequest<User>(`/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Delete a user
+  delete: async (id: string): Promise<void> => {
+    return apiRequest(`/users/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Change user password
+  changePassword: async (id: string, password: string): Promise<void> => {
+    return apiRequest(`/users/${id}/change-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  },
+}
+
 export const settingsApi = {
   // Get all settings
   getAll: async (): Promise<Settings> => {
@@ -225,7 +402,6 @@ export const settingsApi = {
     
     // Transform the response to a more usable format
     const settings: Settings = {
-      domains: response.domains || [],
       utm_sources: response.utm_sources || [],
       utm_mediums: response.utm_mediums || [],
       utm_campaigns: response.utm_campaigns || [],
@@ -239,9 +415,6 @@ export const settingsApi = {
   updateAll: async (settings: Partial<Settings>): Promise<void> => {
     const requestData: Record<string, { value: any }> = {}
     
-    if (settings.domains) {
-      requestData.domains = { value: settings.domains }
-    }
     if (settings.utm_sources) {
       requestData.utm_sources = { value: settings.utm_sources }
     }
@@ -262,4 +435,4 @@ export const settingsApi = {
   },
 }
 
-export type { CreateShortLinkRequest, ShortLink, UtmParams, Settings } 
+export type { CreateShortLinkRequest, ShortLink, UtmParams, Settings, Domain, User } 

@@ -6,6 +6,8 @@ import session from 'express-session'
 import { prismaDb } from './lib/prisma'
 import { linksRouter } from './routes/links'
 import { settingsRouter } from './routes/settings'
+import { domainsRouter } from './routes/domains'
+import { usersRouter } from './routes/users'
 import { authRouter } from './routes/auth'
 import { errorHandler } from './middleware/errorHandler'
 import passport from './middleware/auth'
@@ -75,6 +77,8 @@ app.use('/auth', authRouter)
 // Protected routes (authentication required)
 app.use('/links', linksRouter)
 app.use('/settings', settingsRouter)
+app.use('/domains', domainsRouter)
+app.use('/users', usersRouter)
 
 // Error handling middleware (must be last)
 app.use(errorHandler)

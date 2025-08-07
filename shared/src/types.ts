@@ -13,6 +13,7 @@ export type UtmParams = z.infer<typeof UtmParamsSchema>;
 
 // Short Link Schema
 export const ShortLinkSchema = z.object({
+  id: z.string(),
   slug: z.string().min(1).max(50),
   url: z.string().url(),
   domain: z.string().optional(),

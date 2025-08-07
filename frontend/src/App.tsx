@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage'
 import DashboardPage from './pages/DashboardPage'
 import CreateLinkPage from './pages/CreateLinkPage'
 import SettingsPage from './pages/SettingsPage'
+import UsersPage from './pages/UsersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
@@ -69,6 +70,16 @@ const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <SettingsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <UsersPage />
             </Layout>
           </ProtectedRoute>
         }

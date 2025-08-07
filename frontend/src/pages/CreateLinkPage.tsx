@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Copy, ExternalLink, Loader2 } from 'lucide-react'
-import { linkApi, settingsApi, CreateShortLinkRequest, ShortLink } from '../lib/api'
+import { linkApi, settingsApi, domainsApi, CreateShortLinkRequest, ShortLink } from '../lib/api'
 import { buildShortUrl, copyToClipboard, validateUrl } from '../lib/utils'
 import SelectWithCustom from '../components/ui/SelectWithCustom'
 
@@ -17,10 +17,15 @@ export default function CreateLinkPage() {
   const isEditMode = location.state?.editMode
   const linkData = location.state?.linkData as ShortLink | undefined
 
-  // Fetch settings for dropdown options
+  // Fetch settings and domains for dropdown options
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['settings'],
     queryFn: settingsApi.getAll,
+  })
+
+  const { data: domains, isLoading: domainsLoading } = useQuery({
+    queryKey: ['domains'],
+    queryFn: domainsApi.getAll,
   })
   
   const [formData, setFormData] = useState({
@@ -36,12 +41,12 @@ export default function CreateLinkPage() {
     tags: '',
   })
 
-  // Populate form with existing data if in edit mode
+  // Populate form with existing data if in edit mode or cloning
   useEffect(() => {
-    if (isEditMode && linkData) {
+    if (linkData) {
       setFormData({
         url: linkData.url,
-        slug: linkData.slug,
+        slug: isEditMode ? linkData.slug : '', // Only include slug if editing
         domain: linkData.domain || '',
         utm_source: linkData.utm_params?.utm_source || '',
         utm_medium: linkData.utm_params?.utm_medium || '',
@@ -52,7 +57,7 @@ export default function CreateLinkPage() {
         tags: linkData.tags?.join(', ') || '',
       })
     }
-  }, [isEditMode, linkData])
+  }, [linkData, isEditMode])
 
   // Create/Update link mutation
   const createLinkMutation = useMutation({
@@ -238,6 +243,27 @@ export default function CreateLinkPage() {
     )
   }
 
+  // Show loading state
+  if (settingsLoading || domainsLoading) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="mb-6">
+          <Link to="/dashboard" className="inline-flex items-center text-gray-600 hover:text-gray-900">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Link>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            <span className="ml-3 text-gray-600">Loading settings...</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-2xl mx-auto">
       <div className="mb-6">
@@ -250,10 +276,15 @@ export default function CreateLinkPage() {
       <div className="bg-white rounded-lg shadow">
         <div className="px-6 py-4 border-b border-gray-200">
           <h1 className="text-2xl font-bold text-gray-900">
-            {isEditMode ? 'Edit Link' : 'Create New Link'}
+            {isEditMode ? 'Edit Link' : linkData ? 'Clone Link' : 'Create New Link'}
           </h1>
           <p className="text-gray-600 mt-1">
-            {isEditMode ? 'Update your short link settings.' : 'Create a new short link with custom options.'}
+            {isEditMode 
+              ? 'Update your short link settings.' 
+              : linkData 
+                ? 'Create a new link based on the existing one.' 
+                : 'Create a new short link with custom options.'
+            }
           </p>
         </div>
 
@@ -314,15 +345,29 @@ export default function CreateLinkPage() {
 
           {/* Domain Selection */}
           <div>
+            <div className="mb-2">
+              <label htmlFor="domain" className="block text-sm font-medium text-gray-700">
+                Domain
+              </label>
+              <p className="text-sm text-gray-500 mb-2">
+                Choose which domain this link will use. The selected domain will be used for the copy-paste function, 
+                but the link will work with all configured domains.
+              </p>
+            </div>
             <SelectWithCustom
               id="domain"
               name="domain"
               value={formData.domain}
               onChange={handleInputChange}
-              options={settings?.domains || []}
+              options={domains?.map(d => d.name) || []}
               label="Domain"
               placeholder="Select a domain"
             />
+            {domains?.length === 0 && (
+              <p className="mt-1 text-sm text-amber-600">
+                No domains configured. Please add domains in the Settings page first.
+              </p>
+            )}
           </div>
 
           {/* Description Field */}
@@ -438,7 +483,7 @@ export default function CreateLinkPage() {
                   {isEditMode ? 'Updating...' : 'Creating...'}
                 </>
               ) : (
-                isEditMode ? 'Update Link' : 'Create Link'
+                isEditMode ? 'Update Link' : linkData ? 'Clone Link' : 'Create Link'
               )}
             </button>
           </div>

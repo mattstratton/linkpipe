@@ -24,6 +24,8 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  sessions  Session[]
+
   @@map("users")
 }
 
@@ -33,6 +35,8 @@ model Session {
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("sessions")
 }
@@ -67,4 +71,14 @@ model Setting {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+model Domain {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("domains")
 }
