@@ -70,11 +70,65 @@ pulumi stack output
 
 ### Required Configuration
 
-| Key | Description | Example |
-|-----|-------------|---------|
-| `linkpipe:dbPassword` | Database password | `my-secure-password` |
-| `linkpipe:jwtSecret` | JWT signing secret | `my-jwt-secret` |
-| `linkpipe:sessionSecret` | Session encryption secret | `my-session-secret` |
+| Key | Description | Requirements | Example |
+|-----|-------------|--------------|---------|
+| `linkpipe:dbPassword` | Database password | Min 8 characters, alphanumeric recommended | `my-secure-password` |
+| `linkpipe:jwtSecret` | JWT signing secret | Min 32 characters, random string recommended | `my-jwt-secret-key-32-chars-minimum` |
+| `linkpipe:sessionSecret` | Session encryption secret | Min 32 characters, random string recommended | `my-session-secret-key-32-chars-minimum` |
+
+#### **Secret Requirements:**
+
+**Database Password (`linkpipe:dbPassword`):**
+- **Minimum length**: 8 characters
+- **Recommended**: 12+ characters with mixed case, numbers, and symbols
+- **Used for**: PostgreSQL database authentication
+- **Security**: Stored encrypted in Pulumi state
+
+**JWT Secret (`linkpipe:jwtSecret`):**
+- **Minimum length**: 32 characters
+- **Recommended**: 64+ character random string
+- **Used for**: Signing JSON Web Tokens for API authentication
+- **Security**: Critical for API security, must be kept secret
+
+**Session Secret (`linkpipe:sessionSecret`):**
+- **Minimum length**: 32 characters
+- **Recommended**: 64+ character random string
+- **Used for**: Encrypting session data and cookies
+- **Security**: Critical for session security, must be kept secret
+
+#### **Generating Secure Secrets:**
+
+The deployment script can automatically generate secure secrets, or you can generate them manually:
+
+```bash
+# Generate database password (25 chars)
+openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
+
+# Generate JWT secret (64 chars)
+openssl rand -base64 64 | tr -d "=+/" | cut -c1-64
+
+# Generate session secret (64 chars)
+openssl rand -base64 64 | tr -d "=+/" | cut -c1-64
+```
+
+#### **Secret Management Best Practices:**
+
+**For Development:**
+- Use the deployment script's auto-generation feature
+- Secrets are stored in Pulumi state (local or cloud)
+- Rotate secrets between environments
+
+**For Production:**
+- Generate secrets using a secure random generator
+- Store secrets in a secure vault (AWS Secrets Manager, HashiCorp Vault)
+- Rotate secrets regularly (every 90 days recommended)
+- Use different secrets for each environment
+
+**Security Considerations:**
+- Never commit secrets to version control
+- Use environment-specific secrets
+- Monitor secret access and usage
+- Implement secret rotation procedures
 
 ### Optional Configuration
 
@@ -120,13 +174,67 @@ pulumi config set linkpipe:imageTag latest
 pulumi up
 ```
 
-### 3. Database Migration
+### 3. Database Setup
+
+The database is automatically initialized with:
+- All required tables (users, links, settings, domains, sessions)
+- Default settings (domains, UTM parameters)
+- Default domains (localhost:8001, short.example.com)
+
+No manual migration steps required!
+
+## 🌐 Custom Domain Setup
+
+### Get Load Balancer Hostname
 
 ```bash
-# Connect to the deployed database and run migrations
-pulumi stack output databaseEndpoint
-# Use the endpoint to run: npx prisma migrate deploy
+# View all outputs
+pulumi stack output
+
+# Get just the load balancer hostname
+pulumi stack output loadBalancerDns
+
+# Example output: linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
 ```
+
+### Configure Custom Domain
+
+```bash
+# Set your domain name
+pulumi config set linkpipe:domainName your-domain.com
+
+# Deploy the changes
+pulumi up
+```
+
+### DNS Configuration
+
+1. **Get the load balancer hostname** from the Pulumi output
+2. **Create a CNAME record** in your DNS provider pointing to the load balancer
+3. **Wait for DNS propagation** (usually 5-15 minutes)
+4. **SSL certificate** will be automatically provisioned
+
+**Example DNS Records:**
+```
+# For root domain
+your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+
+# For subdomain
+link.your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+```
+
+**DNS Providers:**
+- **Cloudflare**: Add CNAME record in DNS settings
+- **Route 53**: Create CNAME record in hosted zone
+- **GoDaddy**: Add CNAME record in DNS management
+- **Namecheap**: Add CNAME record in domain list
+
+### SSL Certificate
+
+- **Automatic provisioning** via AWS Certificate Manager
+- **HTTPS redirect** configured automatically
+- **Certificate renewal** handled by AWS
+- **Validation** via DNS (recommended) or email
 
 ## 🛠️ Management Commands
 

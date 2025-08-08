@@ -65,12 +65,41 @@ if ! pulumi config get linkpipe:dbPassword &>/dev/null; then
     echo -e "${YELLOW}🔐 Setting up secrets...${NC}"
     echo -e "${BLUE}Please enter the following secrets:${NC}"
     
-    read -s -p "Database Password: " DB_PASSWORD
+    # Offer to generate secrets
+    read -p "Generate secure secrets automatically? (Y/n): " -n 1 -r
     echo
-    read -s -p "JWT Secret: " JWT_SECRET
-    echo
-    read -s -p "Session Secret: " SESSION_SECRET
-    echo
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        # Manual entry
+        read -s -p "Database Password (min 8 chars): " DB_PASSWORD
+        echo
+        read -s -p "JWT Secret (min 32 chars): " JWT_SECRET
+        echo
+        read -s -p "Session Secret (min 32 chars): " SESSION_SECRET
+        echo
+    else
+        # Generate secure secrets
+        echo -e "${BLUE}Generating secure secrets...${NC}"
+        DB_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
+        JWT_SECRET=$(openssl rand -base64 64 | tr -d "=+/" | cut -c1-64)
+        SESSION_SECRET=$(openssl rand -base64 64 | tr -d "=+/" | cut -c1-64)
+        echo -e "${GREEN}✅ Secrets generated successfully${NC}"
+    fi
+    
+    # Validate secrets
+    if [[ ${#DB_PASSWORD} -lt 8 ]]; then
+        echo -e "${RED}❌ Database password must be at least 8 characters long${NC}"
+        exit 1
+    fi
+    
+    if [[ ${#JWT_SECRET} -lt 32 ]]; then
+        echo -e "${RED}❌ JWT secret must be at least 32 characters long${NC}"
+        exit 1
+    fi
+    
+    if [[ ${#SESSION_SECRET} -lt 32 ]]; then
+        echo -e "${RED}❌ Session secret must be at least 32 characters long${NC}"
+        exit 1
+    fi
     
     pulumi config set --secret linkpipe:dbPassword "$DB_PASSWORD"
     pulumi config set --secret linkpipe:jwtSecret "$JWT_SECRET"
@@ -119,9 +148,9 @@ echo -e "${BLUE}Application URL: $(pulumi stack output applicationUrl)${NC}"
 echo -e "${BLUE}Database Endpoint: $(pulumi stack output databaseEndpoint)${NC}"
 echo ""
 echo -e "${YELLOW}📝 Next steps:${NC}"
-echo "1. Run database migrations: npx prisma migrate deploy"
-echo "2. Configure DNS if using custom domain"
-echo "3. Set up monitoring and alerts"
+echo "1. Configure DNS if using custom domain"
+echo "2. Set up monitoring and alerts"
+echo "3. Create your first admin user"
 echo ""
 echo -e "${BLUE}🔍 Useful commands:${NC}"
 echo "pulumi logs -f                    # View application logs"

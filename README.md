@@ -110,9 +110,7 @@ LinkPipe uses a single `.env` file in the root directory for all services:
 
 ```env
 # Local Development Ports
-FRONTEND_PORT=3000
-BACKEND_PORT=8000
-REDIRECT_PORT=8001
+LINKPIPE_PORT=8000
 POSTGRES_PORT=5433
 PGADMIN_PORT=8003
 
@@ -124,10 +122,13 @@ POSTGRES_DB=linkpipe
 POSTGRES_USER=linkpipe
 POSTGRES_PASSWORD=linkpipe
 
-# Local Development URLs
+# Local Development Configuration
 NODE_ENV=development
-VITE_API_URL=http://localhost:8000
-VITE_REDIRECT_URL=http://localhost:8001
+SERVE_STATIC=true
+
+# Authentication Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-in-production
+SESSION_SECRET=your-super-secret-session-key-change-in-production
 ```
 
 ### Port Configuration
@@ -136,9 +137,7 @@ All ports are configurable via environment variables. If you have conflicts:
 
 ```bash
 # Edit .env file
-FRONTEND_PORT=4000
-BACKEND_PORT=9000
-REDIRECT_PORT=9001
+LINKPIPE_PORT=9000
 POSTGRES_PORT=5434
 PGADMIN_PORT=9003
 ```
@@ -153,7 +152,7 @@ Deploy to AWS using Infrastructure as Code with Pulumi:
 # Navigate to infrastructure directory
 cd infra
 
-# Run the deployment script
+# Run the deployment script (offers to generate secrets automatically)
 ./deploy.sh dev latest mattstratton/linkpipe
 
 # Or deploy manually
@@ -166,9 +165,53 @@ pulumi config set --secret linkpipe:sessionSecret your-session-secret
 pulumi up
 ```
 
+**💡 Pro Tip:** The deployment script can automatically generate secure secrets for you, or you can provide your own.
+
+**🔐 Secret Requirements:**
+- **Database Password**: Minimum 8 characters
+- **JWT Secret**: Minimum 32 characters (recommended: 64+)
+- **Session Secret**: Minimum 32 characters (recommended: 64+)
+
+#### **Setting Up Custom Domain**
+
+After deployment, you can set up a custom domain:
+
+```bash
+# Get the load balancer hostname
+pulumi stack output loadBalancerDns
+
+# Example output: linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+
+# Set up your custom domain
+pulumi config set linkpipe:domainName your-domain.com
+pulumi up
+```
+
+**DNS Configuration:**
+1. **Get the load balancer hostname** from the Pulumi output
+2. **Create a CNAME record** in your DNS provider:
+   - **Name**: `your-domain.com` (or subdomain like `link.your-domain.com`)
+   - **Value**: `linkpipe-alb-123456789.us-east-1.elb.amazonaws.com`
+   - **TTL**: `300` (5 minutes)
+
+**Example DNS Records:**
+```
+# For root domain
+your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+
+# For subdomain
+link.your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+```
+
+**SSL Certificate:**
+- SSL certificate is automatically provisioned via AWS Certificate Manager
+- HTTPS redirect is automatically configured
+- Certificate renewal is handled automatically
+
 **Features:**
 - 🏗️ **ECS Fargate** - Serverless container orchestration
 - 🗄️ **RDS PostgreSQL** - Managed database with high availability
+- 🔧 **Auto Database Setup** - Tables and initial data created automatically
 - 🌐 **Application Load Balancer** - HTTP/HTTPS traffic distribution
 - 🔒 **VPC & Security Groups** - Isolated network infrastructure
 - 📊 **CloudWatch** - Logging and monitoring
@@ -222,7 +265,7 @@ CREATE TABLE links (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   slug VARCHAR(50) UNIQUE NOT NULL,
   url TEXT NOT NULL,
-  domain VARCHAR(255) DEFAULT 'localhost:8001',
+  domain VARCHAR(255) DEFAULT 'localhost:8000',
   utm_source VARCHAR(255),
   utm_medium VARCHAR(255),
   utm_campaign VARCHAR(255),
@@ -254,19 +297,19 @@ CREATE TABLE settings (
 
 ```bash
 # Get available domains
-curl http://localhost:8000/settings/domains
+curl http://localhost:8000/api/settings/domains
 
 # Update domains
-curl -X PUT http://localhost:8000/settings/domains \
+curl -X PUT http://localhost:8000/api/settings/domains \
   -H "Content-Type: application/json" \
   -d '{
-    "value": ["localhost:8001", "short.example.com"],
+    "value": ["localhost:8000", "short.example.com"],
     "description": "Available domains for short links"
   }'
 ```
 
 The application comes with default domains seeded in the database:
-- `localhost:8001` (development)
+- `localhost:8000` (development)
 - `short.example.com` (example production domain)
 
 ### Prisma Management
@@ -346,21 +389,21 @@ npm run lint:fix
 ### Links Management
 
 ```
-POST   /links           # Create short link
-GET    /links           # List all links
-GET    /links/:slug     # Get specific link
-PUT    /links/:slug     # Update link
-DELETE /links/:slug     # Delete link
-HEAD   /links/:slug     # Check if slug exists
+POST   /api/links           # Create short link
+GET    /api/links           # List all links
+GET    /api/links/:slug     # Get specific link
+PUT    /api/links/:slug     # Update link
+DELETE /api/links/:slug     # Delete link
+HEAD   /api/links/:slug     # Check if slug exists
 ```
 
 ### Settings Management
 
 ```
-GET    /settings        # Get all settings
-GET    /settings/:key   # Get specific setting
-PUT    /settings/:key   # Update setting
-PUT    /settings        # Update multiple settings
+GET    /api/settings        # Get all settings
+GET    /api/settings/:key   # Get specific setting
+PUT    /api/settings/:key   # Update setting
+PUT    /api/settings        # Update multiple settings
 ```
 
 ### Redirection
@@ -393,7 +436,7 @@ const response = await fetch('/api/links', {
 const links = await fetch('/api/links').then(r => r.json());
 
 // Redirect (increments click count)
-window.location.href = 'http://localhost:8001/example';
+window.location.href = 'http://localhost:8000/example';
 ```
 
 ## 💰 Cost Estimates
@@ -505,8 +548,6 @@ cp .env.example .env
 docker-compose up -d
 
 # Your services will be available at:
-# Frontend: http://localhost:3000
-# API: http://localhost:8000
-# Redirect: http://localhost:8001
+# Unified App: http://localhost:8000 (Frontend + API + Redirect)
 # pgAdmin: http://localhost:8003
 ```
