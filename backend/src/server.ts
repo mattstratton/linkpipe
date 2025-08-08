@@ -4,6 +4,7 @@ import helmet from 'helmet'
 import morgan from 'morgan'
 import session from 'express-session'
 import path from 'path'
+import bcrypt from 'bcryptjs'
 import { prismaDb } from './lib/prisma'
 import { linksRouter } from './routes/links'
 import { settingsRouter } from './routes/settings'
@@ -19,13 +20,121 @@ const port = process.env.PORT || 8000
 
 // Database connection is handled by the singleton in database.ts
 
+// Auto-seed database if needed
+async function seedDatabaseIfNeeded() {
+  try {
+    console.log('🔍 Checking if database needs seeding...')
+    
+    // Check if any users exist
+    const userCount = await prismaDb.getAllUsers()
+    
+    if (userCount.length === 0) {
+      console.log('🌱 No users found, seeding database...')
+      
+      // Create default admin user
+      const hashedPassword = await bcrypt.hash('admin123', 12)
+      await prismaDb.createUser({
+        username: 'admin',
+        email: 'admin@linkpipe.local',
+        password: hashedPassword,
+        name: 'Admin User',
+        provider: 'basic',
+      })
+      
+      // Insert default settings
+      const settings = [
+        {
+          key: 'domains',
+          value: ['localhost:8001', 'short.example.com'],
+          description: 'Available domains for short links',
+        },
+        {
+          key: 'utm_sources',
+          value: ['linkpipe', 'email', 'social', 'direct', 'organic'],
+          description: 'Available UTM sources',
+        },
+        {
+          key: 'utm_mediums',
+          value: ['shortlink', 'email', 'social', 'cpc', 'organic'],
+          description: 'Available UTM mediums',
+        },
+        {
+          key: 'utm_campaigns',
+          value: ['welcome', 'newsletter', 'promotion', 'product-launch'],
+          description: 'Available UTM campaigns',
+        },
+        {
+          key: 'utm_contents',
+          value: ['header', 'sidebar', 'footer', 'banner'],
+          description: 'Available UTM contents',
+        },
+      ]
+
+      for (const setting of settings) {
+        await prismaDb.updateSetting(setting.key, setting.value, setting.description)
+      }
+      
+      // Insert sample links
+      const sampleLinks = [
+        {
+          slug: 'example',
+          url: 'https://example.com',
+          domain: 'localhost:8001',
+          description: 'Example link for testing',
+          tags: ['example', 'test'],
+          utm_params: {
+            utm_source: 'linkpipe',
+            utm_medium: 'shortlink',
+            utm_campaign: 'welcome',
+          },
+        },
+        {
+          slug: 'github',
+          url: 'https://github.com',
+          domain: 'localhost:8001',
+          description: 'GitHub - Where the world builds software',
+          tags: ['development', 'code'],
+          utm_params: {
+            utm_source: 'linkpipe',
+            utm_medium: 'shortlink',
+            utm_campaign: 'development',
+          },
+        },
+      ]
+
+      for (const link of sampleLinks) {
+        await prismaDb.createLink(link)
+      }
+      
+      console.log('✅ Database seeded successfully!')
+      console.log('👤 Default admin user: admin / admin123')
+      console.log('🔗 Sample links created')
+      console.log('⚙️  Default settings configured')
+    } else {
+      console.log('✅ Database already has users, skipping seed')
+    }
+  } catch (error) {
+    console.error('❌ Error during database seeding:', error)
+    // Don't exit - continue with startup even if seeding fails
+  }
+}
+
 // Middleware
 app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: false,
-  originAgentCluster: false,
-  strictTransportSecurity: false,
+  // Enable proper security headers for HTTPS
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
 }))
 app.use(cors({
   origin: [
@@ -46,9 +155,10 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === 'production' || process.env.FORCE_SECURE_COOKIES === 'true',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: 'lax'
   },
 }))
 
@@ -117,13 +227,16 @@ if (process.env.NODE_ENV === 'production' || process.env.SERVE_STATIC === 'true'
 app.use(errorHandler)
 
 // Start server immediately
-const server = app.listen(port, () => {
+const server = app.listen(port, async () => {
   console.log(`🚀 LinkPipe Unified server running on port ${port}`)
   console.log(`📊 Health check: http://localhost:${port}/health`)
   console.log(`🔐 Auth endpoints: http://localhost:${port}/api/auth`)
   console.log(`🔗 API endpoints: http://localhost:${port}/api/links`)
   console.log(`🔄 Redirect base: http://localhost:${port}`)
   console.log(`🗄️  Database: PostgreSQL`)
+  
+  // Seed database if needed
+  await seedDatabaseIfNeeded()
 })
 
 // Graceful shutdown

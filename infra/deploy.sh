@@ -57,11 +57,11 @@ echo -e "${YELLOW}⚙️  Configuring stack...${NC}"
 
 # Set basic configuration
 pulumi config set aws:region us-east-1
-pulumi config set linkpipe:imageRepository $IMAGE_REPO
-pulumi config set linkpipe:imageTag $IMAGE_TAG
+pulumi config set imageRepository $IMAGE_REPO
+pulumi config set imageTag $IMAGE_TAG
 
 # Check if secrets are already set
-if ! pulumi config get linkpipe:dbPassword &>/dev/null; then
+if ! pulumi config get dbPassword &>/dev/null; then
     echo -e "${YELLOW}🔐 Setting up secrets...${NC}"
     echo -e "${BLUE}Please enter the following secrets:${NC}"
     
@@ -101,9 +101,9 @@ if ! pulumi config get linkpipe:dbPassword &>/dev/null; then
         exit 1
     fi
     
-    pulumi config set --secret linkpipe:dbPassword "$DB_PASSWORD"
-    pulumi config set --secret linkpipe:jwtSecret "$JWT_SECRET"
-    pulumi config set --secret linkpipe:sessionSecret "$SESSION_SECRET"
+    pulumi config set --secret dbPassword "$DB_PASSWORD"
+    pulumi config set --secret jwtSecret "$JWT_SECRET"
+    pulumi config set --secret sessionSecret "$SESSION_SECRET"
     
     echo -e "${GREEN}✅ Secrets configured${NC}"
 else
@@ -114,9 +114,24 @@ fi
 read -p "Do you want to configure a custom domain? (y/N): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "Enter domain name: " DOMAIN_NAME
-    pulumi config set linkpipe:domainName $DOMAIN_NAME
-    echo -e "${GREEN}✅ Domain configured: ${DOMAIN_NAME}${NC}"
+    read -p "Enter primary domain name: " PRIMARY_DOMAIN
+    pulumi config set primaryDomain $PRIMARY_DOMAIN
+    
+    read -p "Do you want to add additional domains? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}Enter additional domains (comma-separated, e.g., link2.example.com,link3.example.com):${NC}"
+        read -p "Additional domains: " ADDITIONAL_DOMAINS
+        if [ ! -z "$ADDITIONAL_DOMAINS" ]; then
+            # Convert comma-separated to JSON array
+            ADDITIONAL_DOMAINS_JSON=$(echo "[$(echo $ADDITIONAL_DOMAINS | sed 's/,/","/g' | sed 's/^/"/' | sed 's/$/"/')]")
+            pulumi config set --path additionalDomains "$ADDITIONAL_DOMAINS_JSON"
+            echo -e "${GREEN}✅ Additional domains configured: ${ADDITIONAL_DOMAINS}${NC}"
+        fi
+    fi
+    
+    echo -e "${GREEN}✅ Domain configuration complete${NC}"
+    echo -e "${YELLOW}📝 Note: You'll need to create DNS records after deployment${NC}"
 fi
 
 # Preview deployment

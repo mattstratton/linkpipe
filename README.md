@@ -172,36 +172,32 @@ pulumi up
 - **JWT Secret**: Minimum 32 characters (recommended: 64+)
 - **Session Secret**: Minimum 32 characters (recommended: 64+)
 
-#### **Setting Up Custom Domain**
+#### **Multi-Domain HTTPS Setup**
 
-After deployment, you can set up a custom domain:
+LinkPipe supports multiple domains with automatic HTTPS. See [docs/MULTI_DOMAIN_SETUP.md](docs/MULTI_DOMAIN_SETUP.md) for detailed instructions.
 
+**Key Features:**
+- **External DNS Support**: Works with any DNS provider (GoDaddy, Namecheap, Cloudflare, etc.)
+- **Automatic HTTPS**: SSL certificates managed by AWS Certificate Manager
+- **Multiple Domains**: Single certificate covers all configured domains
+- **HTTP to HTTPS Redirect**: Automatic redirect for security
+
+**Quick Setup:**
 ```bash
-# Get the load balancer hostname
-pulumi stack output loadBalancerDns
+# Deploy with your primary domain
+pulumi config set primaryDomain "linkpipe.example.com"
 
-# Example output: linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+# Add additional domains
+pulumi config set --path additionalDomains '["link2.example.com", "link3.example.com"]'
 
-# Set up your custom domain
-pulumi config set linkpipe:domainName your-domain.com
-pulumi up
+# Deploy changes
+pulumi up --yes
 ```
 
 **DNS Configuration:**
-1. **Get the load balancer hostname** from the Pulumi output
-2. **Create a CNAME record** in your DNS provider:
-   - **Name**: `your-domain.com` (or subdomain like `link.your-domain.com`)
-   - **Value**: `linkpipe-alb-123456789.us-east-1.elb.amazonaws.com`
-   - **TTL**: `300` (5 minutes)
-
-**Example DNS Records:**
-```
-# For root domain
-your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
-
-# For subdomain
-link.your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
-```
+After deployment, Pulumi will output the required DNS records:
+1. **Certificate Validation**: TXT records for SSL certificate validation
+2. **Traffic Routing**: CNAME records pointing to the ALB
 
 **SSL Certificate:**
 - SSL certificate is automatically provisioned via AWS Certificate Manager
@@ -211,7 +207,7 @@ link.your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.c
 **Features:**
 - 🏗️ **ECS Fargate** - Serverless container orchestration
 - 🗄️ **RDS PostgreSQL** - Managed database with high availability
-- 🔧 **Auto Database Setup** - Tables and initial data created automatically
+- 🔧 **Application Database Setup** - Tables and initial data created by application startup
 - 🌐 **Application Load Balancer** - HTTP/HTTPS traffic distribution
 - 🔒 **VPC & Security Groups** - Isolated network infrastructure
 - 📊 **CloudWatch** - Logging and monitoring

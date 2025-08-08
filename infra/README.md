@@ -1,344 +1,248 @@
-# LinkPipe Infrastructure with Pulumi
+# LinkPipe Infrastructure
 
-This directory contains the Infrastructure as Code (IaC) for deploying LinkPipe to AWS using Pulumi.
+This directory contains the Pulumi infrastructure code for deploying LinkPipe to AWS.
 
-## 🏗️ Architecture
+## Prerequisites
 
-The infrastructure creates a production-ready deployment with:
+- [Pulumi CLI](https://www.pulumi.com/docs/install/)
+- [AWS CLI](https://aws.amazon.com/cli/) configured with appropriate credentials
+- Docker image built and pushed to a registry (GitHub Container Registry or Docker Hub)
 
-- **ECS Fargate**: Containerized application with auto-scaling
-- **RDS PostgreSQL**: Managed database with high availability
-- **Application Load Balancer**: HTTP/HTTPS traffic distribution
-- **VPC**: Isolated network with public/private subnets
-- **Route 53**: DNS management (optional)
-- **ACM**: SSL certificates (optional)
-- **CloudWatch**: Logging and monitoring
+## Configuration
 
-## 📋 Prerequisites
+Create a `Pulumi.yaml` file in this directory with your configuration:
 
-1. **Pulumi CLI**: Install from [pulumi.com](https://pulumi.com/docs/get-started/install/)
-2. **AWS CLI**: Configured with appropriate credentials
-3. **Node.js**: Version 18 or higher
-4. **Docker Image**: Pre-built and pushed to registry
-
-## 🚀 Quick Start
-
-### 1. Install Dependencies
-
-```bash
-cd infra
-npm install
+```yaml
+name: linkpipe
+runtime: nodejs
+description: LinkPipe infrastructure
 ```
-
-### 2. Configure Pulumi
-
-```bash
-# Login to Pulumi (if using Pulumi Cloud)
-pulumi login
-
-# Create a new stack
-pulumi stack init dev
-
-# Set configuration values
-pulumi config set aws:region us-east-1
-pulumi config set linkpipe:imageRepository mattstratton/linkpipe
-pulumi config set linkpipe:imageTag latest
-
-# Set secrets (replace with your actual values)
-pulumi config set --secret linkpipe:dbPassword your-secure-db-password
-pulumi config set --secret linkpipe:jwtSecret your-jwt-secret-key
-pulumi config set --secret linkpipe:sessionSecret your-session-secret-key
-
-# Optional: Set domain name for HTTPS
-pulumi config set linkpipe:domainName your-domain.com
-```
-
-### 3. Deploy Infrastructure
-
-```bash
-# Preview changes
-pulumi preview
-
-# Deploy
-pulumi up
-
-# Get outputs
-pulumi stack output
-```
-
-## 🔧 Configuration Options
 
 ### Required Configuration
 
-| Key | Description | Requirements | Example |
-|-----|-------------|--------------|---------|
-| `linkpipe:dbPassword` | Database password | Min 8 characters, alphanumeric recommended | `my-secure-password` |
-| `linkpipe:jwtSecret` | JWT signing secret | Min 32 characters, random string recommended | `my-jwt-secret-key-32-chars-minimum` |
-| `linkpipe:sessionSecret` | Session encryption secret | Min 32 characters, random string recommended | `my-session-secret-key-32-chars-minimum` |
-
-#### **Secret Requirements:**
-
-**Database Password (`linkpipe:dbPassword`):**
-- **Minimum length**: 8 characters
-- **Recommended**: 12+ characters with mixed case, numbers, and symbols
-- **Used for**: PostgreSQL database authentication
-- **Security**: Stored encrypted in Pulumi state
-
-**JWT Secret (`linkpipe:jwtSecret`):**
-- **Minimum length**: 32 characters
-- **Recommended**: 64+ character random string
-- **Used for**: Signing JSON Web Tokens for API authentication
-- **Security**: Critical for API security, must be kept secret
-
-**Session Secret (`linkpipe:sessionSecret`):**
-- **Minimum length**: 32 characters
-- **Recommended**: 64+ character random string
-- **Used for**: Encrypting session data and cookies
-- **Security**: Critical for session security, must be kept secret
-
-#### **Generating Secure Secrets:**
-
-The deployment script can automatically generate secure secrets, or you can generate them manually:
+Set the following configuration values:
 
 ```bash
-# Generate database password (25 chars)
-openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
+# Database password (minimum 8 characters)
+pulumi config set dbPassword "your-secure-db-password"
 
-# Generate JWT secret (64 chars)
-openssl rand -base64 64 | tr -d "=+/" | cut -c1-64
+# JWT secret (minimum 32 characters)
+pulumi config set jwtSecret "your-jwt-secret-at-least-32-characters-long"
 
-# Generate session secret (64 chars)
-openssl rand -base64 64 | tr -d "=+/" | cut -c1-64
+# Session secret (minimum 32 characters)
+pulumi config set sessionSecret "your-session-secret-at-least-32-characters-long"
 ```
-
-#### **Secret Management Best Practices:**
-
-**For Development:**
-- Use the deployment script's auto-generation feature
-- Secrets are stored in Pulumi state (local or cloud)
-- Rotate secrets between environments
-
-**For Production:**
-- Generate secrets using a secure random generator
-- Store secrets in a secure vault (AWS Secrets Manager, HashiCorp Vault)
-- Rotate secrets regularly (every 90 days recommended)
-- Use different secrets for each environment
-
-**Security Considerations:**
-- Never commit secrets to version control
-- Use environment-specific secrets
-- Monitor secret access and usage
-- Implement secret rotation procedures
 
 ### Optional Configuration
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| `linkpipe:imageRepository` | Docker image repository | `mattstratton/linkpipe` |
-| `linkpipe:imageTag` | Docker image tag | `latest` |
-| `linkpipe:domainName` | Custom domain for HTTPS | `undefined` |
-| `aws:region` | AWS region | `us-east-1` |
-
-## 📊 Resource Sizing
-
-### Development (Default)
-- **ECS**: 256 CPU units, 512 MB RAM
-- **RDS**: db.t3.micro (1 vCPU, 1 GB RAM)
-- **Storage**: 20 GB GP2
-
-### Production (Recommended)
-- **ECS**: 512 CPU units, 1 GB RAM
-- **RDS**: db.t3.small (2 vCPU, 2 GB RAM)
-- **Storage**: 100 GB GP2
-
-To modify resource sizes, edit the values in `index.ts`.
-
-## 🔄 Deployment Workflow
-
-### 1. Build and Push Image
-
 ```bash
-# Build the Docker image
-cd ..
-docker build -f backend/Dockerfile -t mattstratton/linkpipe:latest .
+# Docker image repository (default: mattstratton/linkpipe)
+pulumi config set imageRepository "your-registry/linkpipe"
 
-# Push to registry
-docker push mattstratton/linkpipe:latest
+# Docker image tag (default: latest)
+pulumi config set imageTag "v1.0.0"
+
+# Primary domain for HTTPS (e.g., "linkpipe.example.com")
+pulumi config set primaryDomain "your-domain.com"
+
+# Additional domains for multi-domain support
+pulumi config set --path additionalDomains '["link2.example.com", "link3.example.com"]'
 ```
 
-### 2. Update Infrastructure
+## Multi-Domain HTTPS Setup
+
+LinkPipe supports multiple domains pointing to the same service with automatic HTTPS. This works with any external DNS provider (GoDaddy, Namecheap, Cloudflare, etc.).
+
+### How It Works
+
+1. **Single Certificate**: One SSL certificate covers all configured domains
+2. **DNS Validation**: Certificate validation via DNS records (no AWS DNS required)
+3. **Two-Step Process**: Deploy with HTTP first, then enable HTTPS after certificate validation
+4. **External DNS**: Works with any DNS provider
+
+### Setup Process
+
+#### 1. Deploy Infrastructure
 
 ```bash
-cd infra
-pulumi config set linkpipe:imageTag latest
-pulumi up
+# Deploy with your primary domain
+pulumi config set primaryDomain "linkpipe.example.com"
+pulumi up --yes
 ```
 
-### 3. Database Setup
+#### 2. Create DNS Records
 
-The database is automatically initialized with:
-- All required tables (users, links, settings, domains, sessions)
-- Default settings (domains, UTM parameters)
-- Default domains (localhost:8001, short.example.com)
+After deployment, Pulumi will output the required DNS records. You'll need to create two types of records:
 
-No manual migration steps required!
+**A. Certificate Validation Records**
+These are temporary TXT records for SSL certificate validation:
 
-## 🌐 Custom Domain Setup
+```
+Domain: linkpipe.example.com
+Record Type: TXT
+Name: _acme-challenge.linkpipe.example.com
+Value: [AWS-provided validation string]
+TTL: 300
+```
 
-### Get Load Balancer Hostname
+**B. Traffic Routing Records**
+These are permanent CNAME records to route traffic to your service:
+
+```
+Domain: linkpipe.example.com
+Record Type: CNAME
+Name: linkpipe.example.com
+Value: [ALB DNS name from outputs]
+TTL: 300
+```
+
+#### 3. Wait for Validation
+
+- **DNS Propagation**: 5-15 minutes (can take up to 24 hours)
+- **Certificate Validation**: Automatic once DNS records are created
+- **HTTPS Activation**: Automatic once certificate is validated
+
+**Note**: The infrastructure will automatically enable HTTPS once the certificate is validated. No manual steps required.
+
+### DNS Provider Instructions
+
+#### GoDaddy
+1. Go to DNS Management
+2. Add CNAME record for your domain
+3. Add TXT record for certificate validation
+4. Wait for propagation (usually 5-15 minutes)
+
+#### Namecheap
+1. Go to Advanced DNS
+2. Add CNAME record for your domain
+3. Add TXT record for certificate validation
+4. Wait for propagation
+
+#### Cloudflare
+1. Go to DNS settings
+2. Add CNAME record for your domain
+3. Add TXT record for certificate validation
+4. Ensure SSL/TLS is set to "Full" or "Full (strict)"
+
+#### Route 53 (if using AWS DNS)
+1. Create hosted zone for your domain
+2. Update nameservers at your domain registrar
+3. Create CNAME and TXT records as specified
+
+### Certificate Validation
+
+The SSL certificate will be automatically validated once the DNS records are created and propagated. This typically takes 5-15 minutes but can take up to 24 hours.
+
+To check certificate status:
+```bash
+pulumi stack output certificateArn
+aws acm describe-certificate --certificate-arn [certificate-arn]
+```
+
+### Troubleshooting
+
+#### Certificate Validation Fails
+- Verify DNS records are created correctly
+- Check TTL values (use 300 seconds for faster propagation)
+- Wait for DNS propagation (can take up to 24 hours)
+- Verify domain ownership
+
+#### HTTPS Not Working
+- Check that certificate is validated
+- Verify HTTPS listener is created
+- Check security group allows port 443
+- Verify DNS CNAME points to correct ALB
+
+#### Domain Not Resolving
+- Verify CNAME record is created
+- Check DNS propagation
+- Verify domain registrar settings
+- Test with `nslookup` or `dig`
+
+## Database Setup
+
+The database is automatically initialized by the application during startup. No manual migration steps are required.
+
+## Secret Requirements
+
+| Secret | Minimum Length | Description | Generation Command |
+|--------|---------------|-------------|-------------------|
+| `dbPassword` | 8 characters | PostgreSQL database password | `openssl rand -base64 12` |
+| `jwtSecret` | 32 characters | JWT token signing secret | `openssl rand -base64 32` |
+| `sessionSecret` | 32 characters | Express session secret | `openssl rand -base64 32` |
+
+### Secret Management Best Practices
+
+1. **Use Strong Secrets**: Generate random secrets using `openssl rand -base64`
+2. **Rotate Regularly**: Update secrets periodically
+3. **Secure Storage**: Use Pulumi's secret management
+4. **Environment Separation**: Use different secrets for dev/staging/prod
+
+## Deployment
 
 ```bash
-# View all outputs
+# Deploy to AWS
+pulumi up --yes
+
+# View outputs
 pulumi stack output
 
-# Get just the load balancer hostname
-pulumi stack output loadBalancerDns
-
-# Example output: linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+# Destroy infrastructure (if needed)
+pulumi destroy --yes
 ```
 
-### Configure Custom Domain
+## Outputs
 
-```bash
-# Set your domain name
-pulumi config set linkpipe:domainName your-domain.com
+After deployment, you'll get the following outputs:
 
-# Deploy the changes
-pulumi up
-```
+- `applicationUrl`: The HTTPS URL for your application
+- `loadBalancerDns`: The ALB DNS name for CNAME records
+- `databaseEndpoint`: RDS database endpoint
+- `certificateArn`: SSL certificate ARN
+- `supportedDomains`: List of all configured domains
 
-### DNS Configuration
+## Architecture
 
-1. **Get the load balancer hostname** from the Pulumi output
-2. **Create a CNAME record** in your DNS provider pointing to the load balancer
-3. **Wait for DNS propagation** (usually 5-15 minutes)
-4. **SSL certificate** will be automatically provisioned
+The infrastructure creates:
 
-**Example DNS Records:**
-```
-# For root domain
-your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
+- **VPC**: Isolated network with public and private subnets
+- **RDS**: PostgreSQL database in private subnet
+- **ECS Fargate**: Containerized application
+- **ALB**: Load balancer with HTTPS support
+- **ACM**: SSL certificate for HTTPS
+- **CloudWatch**: Logging and monitoring
+- **Auto Scaling**: Automatic scaling based on CPU usage
 
-# For subdomain
-link.your-domain.com    CNAME   linkpipe-alb-123456789.us-east-1.elb.amazonaws.com
-```
+## Security
 
-**DNS Providers:**
-- **Cloudflare**: Add CNAME record in DNS settings
-- **Route 53**: Create CNAME record in hosted zone
-- **GoDaddy**: Add CNAME record in DNS management
-- **Namecheap**: Add CNAME record in domain list
+- Database is in private subnet
+- Application uses HTTPS only
+- Security groups restrict access
+- Secrets are encrypted
+- HSTS headers enabled
+- CSP headers configured
 
-### SSL Certificate
+## Monitoring
 
-- **Automatic provisioning** via AWS Certificate Manager
-- **HTTPS redirect** configured automatically
-- **Certificate renewal** handled by AWS
-- **Validation** via DNS (recommended) or email
+- CloudWatch logs for application
+- ALB access logs
+- RDS monitoring
+- Auto scaling metrics
 
-## 🛠️ Management Commands
+## Cost Optimization
 
-```bash
-# View current stack
-pulumi stack
+- Use t3.micro for RDS (free tier eligible)
+- Single ECS task for development
+- Auto scaling prevents over-provisioning
+- CloudWatch logs retention set to 7 days
 
-# View resources
-pulumi stack --show-urns
+## Custom Domain Setup
 
-# View logs
-pulumi logs -f
+For custom domains with external DNS providers:
 
-# Update specific resources
-pulumi up --target aws:ecs/service:Service
+1. **Deploy with domain**: Set `primaryDomain` in config
+2. **Create DNS records**: Follow the output instructions
+3. **Wait for validation**: Certificate validation takes 5-15 minutes
+4. **Test access**: Verify HTTPS works with your domain
 
-# Destroy infrastructure
-pulumi destroy
-
-# Export/Import stack
-pulumi stack export --file stack.json
-pulumi stack import --file stack.json
-```
-
-## 🔍 Monitoring and Logs
-
-### CloudWatch Logs
-- **Log Group**: `/ecs/linkpipe`
-- **Retention**: 7 days
-- **View logs**: AWS Console → CloudWatch → Log Groups
-
-### Application Metrics
-- **ECS Service**: CPU/Memory utilization
-- **RDS**: Database connections, storage
-- **ALB**: Request count, response time
-
-## 🔒 Security
-
-### Network Security
-- **VPC**: Isolated network with public/private subnets
-- **Security Groups**: Restrictive access rules
-- **RDS**: Only accessible from ECS tasks
-
-### Secrets Management
-- **Database Password**: Stored as Pulumi secret
-- **JWT Secret**: Stored as Pulumi secret
-- **Session Secret**: Stored as Pulumi secret
-
-### SSL/TLS
-- **ACM Certificate**: Automatic SSL certificate (if domain provided)
-- **HTTPS**: Redirects HTTP to HTTPS
-
-## 💰 Cost Estimation
-
-### Monthly Costs (us-east-1)
-- **ECS Fargate**: ~$15-30/month
-- **RDS t3.micro**: ~$15/month
-- **ALB**: ~$20/month
-- **Data Transfer**: ~$5-10/month
-- **Total**: ~$55-75/month
-
-### Cost Optimization
-- Use Spot instances for non-critical workloads
-- Implement auto-scaling based on demand
-- Monitor and optimize database queries
-- Use CloudFront for static content caching
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-1. **Image Pull Errors**
-   ```bash
-   # Check if image exists in registry
-   docker pull mattstratton/linkpipe:latest
-   ```
-
-2. **Database Connection Issues**
-   ```bash
-   # Check security group rules
-   aws ec2 describe-security-groups --group-ids sg-xxx
-   ```
-
-3. **ECS Service Not Starting**
-   ```bash
-   # Check task definition
-   aws ecs describe-task-definition --task-definition linkpipe
-   ```
-
-### Debug Commands
-
-```bash
-# View ECS service events
-aws ecs describe-services --cluster linkpipe-cluster --services linkpipe-service
-
-# View task logs
-aws logs tail /ecs/linkpipe --follow
-
-# Check ALB health
-aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:...
-```
-
-## 📚 Additional Resources
-
-- [Pulumi AWS Documentation](https://www.pulumi.com/docs/clouds/aws/)
-- [ECS Best Practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/)
-- [RDS Best Practices](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_BestPractices.html) 
+The system supports multiple domains pointing to the same service, making it easy to add additional domains later. 
