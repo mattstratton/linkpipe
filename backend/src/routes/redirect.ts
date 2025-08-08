@@ -7,9 +7,15 @@ import { prismaDb } from '../lib/prisma';
 export const redirectRouter = Router();
 
 // GET /:slug - Redirect to the target URL
+// This will only match paths that don't start with /api/ or /health
 redirectRouter.get('/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
+    
+    // Skip API routes, health check, and static files
+    if (slug === 'api' || slug === 'health' || slug.includes('.') || slug === 'index.html') {
+      return; // Let the main server handle these routes
+    }
     
     // Validate slug format
     if (!isValidSlug(slug)) {
@@ -164,17 +170,13 @@ function createErrorPage(title: string, message: string, statusCode: number): st
   `.trim();
 }
 
-// GET /health - Health check endpoint
-redirectRouter.get('/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'linkpipe-redirect'
-  });
-});
-
-// Catch-all for any other routes
+// Catch-all for any other routes (this will be handled by the main server for API routes)
 redirectRouter.get('*', (req: Request, res: Response) => {
+  // Skip root path and API routes
+  if (req.path === '/' || req.path.startsWith('/api/') || req.path === '/health') {
+    return; // Let the main server handle these routes
+  }
+  
   res.status(404).send(createErrorPage(
     'Page Not Found',
     'The page you are looking for does not exist.',
