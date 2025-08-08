@@ -1,17 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import passport from 'passport';
-import { Strategy as GitHubStrategy } from 'passport-github2';
+import GitHubStrategy from 'passport-github2';
 import { BasicStrategy } from 'passport-http';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prismaDb } from '../lib/prisma';
 
 // Extend Express Request interface to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: any;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: any;
   }
 }
 

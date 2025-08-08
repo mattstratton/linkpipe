@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "build:frontend": "cd ../frontend && npm run build",
-    "build:all": "npm run build:frontend && npm run build",
+    "build:all": "npm run build",
     "clean": "rm -rf dist public",
     "test": "jest",
     "lint": "eslint . --ext .ts",
@@ -41,6 +40,7 @@
     "@types/morgan": "^1.9.8",
     "@types/node": "^20.9.0",
     "@types/passport": "^1.0.16",
+
     "@types/passport-http": "^0.3.10",
     "@types/pg": "^8.10.0",
     "@typescript-eslint/eslint-plugin": "^6.10.0",

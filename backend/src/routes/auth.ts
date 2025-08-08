@@ -129,7 +129,7 @@ router.get('/github/callback',
 // Get current user
 router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = await prismaDb.getUserById(req.user.id);
+    const user = await prismaDb.getUserById((req.user as any).id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -170,7 +170,7 @@ router.post('/change-password', requireAuth, async (req: Request, res: Response)
       return res.status(400).json({ error: 'Current password and new password are required' });
     }
 
-    const user = await prismaDb.getUserById(req.user.id);
+    const user = await prismaDb.getUserById((req.user as any).id);
     if (!user || !user.password) {
       return res.status(404).json({ error: 'User not found' });
     }

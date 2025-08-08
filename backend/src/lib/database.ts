@@ -242,6 +242,7 @@ export class Database {
     if (row.utm_content) utm_params.utm_content = row.utm_content;
 
     return {
+      id: row.id,
       slug: row.slug,
       url: row.url,
       domain: row.domain,
