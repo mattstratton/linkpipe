@@ -22,6 +22,10 @@ const port = process.env.PORT || 8000
 // Middleware
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginResourcePolicy: false,
+  originAgentCluster: false,
+  strictTransportSecurity: false,
 }))
 app.use(cors({
   origin: [
