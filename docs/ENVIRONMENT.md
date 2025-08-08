@@ -20,13 +20,14 @@ linkpipe/
 ├── backend/
 │   ├── prisma/
 │   │   └── schema.prisma # References DATABASE_URL from root .env
+│   ├── public/           # Built React frontend (served by Express)
 │   └── src/
 │       └── lib/
 │           └── prisma.ts # Uses DATABASE_URL from root .env
 ├── frontend/
 │   └── src/
 │       └── lib/
-│           └── api.ts    # Uses VITE_API_URL from root .env
+│           └── api.ts    # Uses relative API paths (/api/*)
 └── docker-compose.yml    # References all variables from root .env
 ```
 
@@ -40,16 +41,13 @@ linkpipe/
 # =============================================================================
 
 # Local Development Ports (customize these if you have conflicts)
-FRONTEND_PORT=3000
-BACKEND_PORT=8000
-REDIRECT_PORT=8001
+LINKPIPE_PORT=8000
 POSTGRES_PORT=5433
 PGADMIN_PORT=8003
 
-# Local Development URLs (auto-updated based on ports)
+# Local Development URLs
 NODE_ENV=development
-VITE_API_URL=http://localhost:8000
-VITE_REDIRECT_URL=http://localhost:8001
+SERVE_STATIC=true
 
 # Database Configuration (PostgreSQL + Prisma)
 DATABASE_URL=postgresql://linkpipe:linkpipe@localhost:5433/linkpipe
@@ -69,13 +67,10 @@ PGADMIN_DEFAULT_PASSWORD=admin
 ```env
 # Production Environment
 NODE_ENV=production
+SERVE_STATIC=true
 
 # Database
 DATABASE_URL=postgresql://linkpipe:strong-password@your-db-host:5432/linkpipe
-
-# Frontend URLs
-VITE_API_URL=https://api.yourdomain.com
-VITE_REDIRECT_URL=https://go.yourdomain.com
 
 # Security
 ADMIN_USERNAME=admin

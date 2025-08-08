@@ -37,7 +37,8 @@ interface AuthProviderProps {
 
 // Special function for auth requests that don't use the standard API response format
 const authRequest = async (endpoint: string, options: RequestInit = {}) => {
-  const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+  // API base URL - use relative path for unified server
+  const API_BASE_URL = '/api';
   const url = `${API_BASE_URL}${endpoint}`;
   
   // Get auth token

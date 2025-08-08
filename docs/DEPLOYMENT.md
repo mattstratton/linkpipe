@@ -5,22 +5,21 @@ This guide covers deploying LinkPipe to various platforms and configurations.
 ## 🌍 Deployment Strategies
 
 ### Strategy 1: Docker Production (Recommended)
-- **All Services**: Docker containers
+- **Unified Service**: Single Docker container (API + Frontend + Redirect)
 - **Database**: PostgreSQL in Docker or managed service
 - **Cost**: $5-50/month
 - **Scalability**: Good
 - **Ease**: High
 
 ### Strategy 2: Railway Full Stack
-- **Frontend**: Railway static hosting
-- **Backend**: Railway Node.js service
+- **Unified Service**: Railway Node.js service
 - **Database**: Railway PostgreSQL
 - **Cost**: $5-20/month
 - **Scalability**: Excellent
 - **Ease**: Very High
 
 ### Strategy 3: Vercel + Railway Hybrid
-- **Frontend**: Vercel
+- **Frontend**: Vercel (optional - can use unified service)
 - **Backend**: Railway Node.js service
 - **Database**: Railway PostgreSQL
 - **Cost**: $0-20/month
@@ -28,7 +27,7 @@ This guide covers deploying LinkPipe to various platforms and configurations.
 - **Ease**: High
 
 ### Strategy 4: VPS/Docker
-- **All Services**: Docker on VPS
+- **Unified Service**: Docker on VPS
 - **Database**: PostgreSQL in Docker
 - **Cost**: $5-20/month
 - **Scalability**: Manual
@@ -49,24 +48,12 @@ Create `docker-compose.prod.yml`:
 version: '3.8'
 
 services:
-  frontend:
+  linkpipe:
     build:
       context: .
-      dockerfile: frontend/Dockerfile.prod
+      dockerfile: backend/Dockerfile
     ports:
-      - "80:80"
-    environment:
-      - VITE_API_URL=https://api.yourdomain.com
-      - VITE_REDIRECT_URL=https://go.yourdomain.com
-    depends_on:
-      - backend
-
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile.prod
-    ports:
-      - "8000:8000"
+      - "80:8000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://linkpipe:linkpipe@postgres:5432/linkpipe
@@ -74,18 +61,6 @@ services:
       - postgres
     volumes:
       - ./backend/data:/app/data
-
-  redirect-service:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile.redirect.prod
-    ports:
-      - "8001:8001"
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://linkpipe:linkpipe@postgres:5432/linkpipe
-    depends_on:
-      - postgres
 
   postgres:
     image: postgres:15-alpine
@@ -97,93 +72,51 @@ services:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - frontend
-      - backend
-      - redirect-service
-
 volumes:
   postgres-data:
 ```
 
-### Step 2: Create Production Dockerfiles
+### Step 2: Create Production Dockerfile
 
-`frontend/Dockerfile.prod`:
-```dockerfile
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY frontend/package*.json ./frontend/
-RUN npm install --ignore-scripts
-
-COPY shared/ ./shared/
-COPY frontend/ ./frontend/
-WORKDIR /app/frontend
-RUN npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/frontend/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-`backend/Dockerfile.prod`:
+`backend/Dockerfile`:
 ```dockerfile
 FROM node:18-alpine
 WORKDIR /app
+
+# Install dependencies for building native modules
+RUN apk add --no-cache python3 make g++
+
+# Copy workspace package.json first
 COPY package*.json ./
 COPY shared/package*.json ./shared/
 COPY backend/package*.json ./backend/
+COPY frontend/package*.json ./frontend/
+
+# Install workspace dependencies
 RUN npm install --ignore-scripts
 
+# Copy source code
 COPY shared/ ./shared/
 COPY backend/ ./backend/
+COPY frontend/ ./frontend/
+
+# Set working directory to backend
 WORKDIR /app/backend
 
 # Generate Prisma client
 RUN npx prisma generate
 
-# Build the application
+# Build frontend
+RUN npm run build:frontend
+
+# Build backend
 RUN npm run build
 
 EXPOSE 8000
 CMD ["node", "dist/server.js"]
 ```
 
-`backend/Dockerfile.redirect.prod`:
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY backend/package*.json ./backend/
-RUN npm install --ignore-scripts
-
-COPY shared/ ./shared/
-COPY backend/ ./backend/
-WORKDIR /app/backend
-
-# Generate Prisma client
-RUN npx prisma generate
-
-# Build the application
-RUN npm run build
-
-EXPOSE 8001
-CMD ["node", "dist/redirect-server.js"]
-```
-
-### Step 3: Create Nginx Configuration
+### Step 3: Create Nginx Configuration (Optional)
 
 `nginx.conf`:
 ```nginx
@@ -192,16 +125,8 @@ events {
 }
 
 http {
-    upstream frontend {
-        server frontend:80;
-    }
-
-    upstream backend {
-        server backend:8000;
-    }
-
-    upstream redirect {
-        server redirect-service:8001;
+    upstream linkpipe {
+        server linkpipe:8000;
     }
 
     server {
@@ -217,35 +142,9 @@ http {
         ssl_certificate /etc/nginx/ssl/cert.pem;
         ssl_certificate_key /etc/nginx/ssl/key.pem;
 
-        # Frontend
+        # All traffic to unified service
         location / {
-            proxy_pass http://frontend;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
-
-        # API
-        location /api/ {
-            proxy_pass http://backend/;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
-    }
-
-    server {
-        listen 443 ssl;
-        server_name go.yourdomain.com;
-
-        ssl_certificate /etc/nginx/ssl/cert.pem;
-        ssl_certificate_key /etc/nginx/ssl/key.pem;
-
-        # Redirect service
-        location / {
-            proxy_pass http://redirect;
+            proxy_pass http://linkpipe;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -268,20 +167,16 @@ docker-compose -f docker-compose.prod.yml exec backend npx prisma migrate deploy
 docker-compose -f docker-compose.prod.yml exec backend npm run db:seed
 ```
 
-## 🚂 Railway Full Stack Deployment
+## 🚂 Railway Deployment
 
-### Step 1: Deploy Backend
+### Step 1: Deploy Unified Service
 
-1. **Connect to Railway**
+1. **Install Railway CLI**
    ```bash
-   # Install Railway CLI
    npm install -g @railway/cli
-   
-   # Login to Railway
-   railway login
    ```
 
-2. **Deploy Backend Service**
+2. **Deploy to Railway**
    ```bash
    cd backend
    railway init
@@ -291,37 +186,27 @@ docker-compose -f docker-compose.prod.yml exec backend npm run db:seed
 3. **Configure Environment Variables**
    ```bash
    railway variables set NODE_ENV=production
-   railway variables set DATABASE_URL=postgresql://...
+   railway variables set DATABASE_URL=your-postgresql-url
    ```
 
-4. **Deploy Database**
+### Step 2: Deploy Database
+
+1. **Create PostgreSQL Service**
    ```bash
-   # Create PostgreSQL service in Railway dashboard
-   # Or use Railway CLI
    railway service create postgres
    ```
 
-### Step 2: Deploy Frontend
-
-1. **Deploy to Railway Static**
+2. **Link to Main Service**
    ```bash
-   cd frontend
-   railway init
-   railway up
-   ```
-
-2. **Configure Environment**
-   ```bash
-   railway variables set VITE_API_URL=https://your-backend-url.railway.app
-   railway variables set VITE_REDIRECT_URL=https://your-redirect-url.railway.app
+   railway link
    ```
 
 ## 🔷 Vercel + Railway Hybrid Deployment
 
-### Step 1: Deploy Backend to Railway
+### Step 1: Deploy Unified Service to Railway
 Follow Railway deployment steps above.
 
-### Step 2: Deploy Frontend to Vercel
+### Step 2: Deploy Frontend to Vercel (Optional)
 
 1. **Install Vercel CLI**
    ```bash
@@ -343,13 +228,11 @@ Follow Railway deployment steps above.
 4. **Environment Variables in Vercel**
    ```bash
    vercel env add VITE_API_URL production
-   vercel env add VITE_REDIRECT_URL production
    ```
 
 ### Custom Domain on Vercel
 ```bash
 vercel domains add yourdomain.com
-vercel domains add go.yourdomain.com  # for redirects
 ```
 
 ## 🌐 Custom Domain Setup
@@ -363,7 +246,6 @@ vercel domains add go.yourdomain.com  # for redirects
    A     @           your-server-ip
    CNAME www         yourdomain.com
    CNAME go          yourdomain.com
-   CNAME api         your-backend-url
    ```
 
 ### AWS Route 53

@@ -1,4 +1,4 @@
-name: Publish Docker Images
+name: Publish Docker Image
 
 on:
   push:
@@ -16,8 +16,7 @@ jobs:
     env:
       REGISTRY_DOCKERHUB: docker.io
       REGISTRY_GHCR: ghcr.io
-      IMAGE_FRONTEND: mattstratton/conducky-frontend
-      IMAGE_BACKEND: mattstratton/conducky-backend
+      IMAGE_LINKPIPE: mattstratton/linkpipe
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,62 +44,33 @@ jobs:
         run: |
           echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Extract metadata for frontend
-        id: meta-frontend
+      - name: Extract metadata for unified service
+        id: meta-linkpipe
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.IMAGE_FRONTEND }}
-            ${{ env.REGISTRY_GHCR }}/${{ github.repository }}-frontend
+            ${{ env.IMAGE_LINKPIPE }}
+            ${{ env.REGISTRY_GHCR }}/${{ github.repository }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push frontend image
-        id: push-frontend
+      - name: Build and push unified image
+        id: push-linkpipe
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          context: .
+          file: ./backend/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
+          tags: ${{ steps.meta-linkpipe.outputs.tags }}
+          labels: ${{ steps.meta-linkpipe.outputs.labels }}
           build-args: |
             APP_VERSION=${{ env.TAG }}
 
-      - name: Generate artifact attestation for frontend
+      - name: Generate artifact attestation for unified service
         uses: actions/attest-build-provenance@v2
         with:
-          subject-name: ${{ env.REGISTRY_GHCR }}/${{ github.repository }}-frontend
-          subject-digest: ${{ steps.push-frontend.outputs.digest }}
-          push-to-registry: true
-
-      - name: Extract metadata for backend
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ env.IMAGE_BACKEND }}
-            ${{ env.REGISTRY_GHCR }}/${{ github.repository }}-backend
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push backend image
-        id: push-backend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ env.TAG }}
-
-      - name: Generate artifact attestation for backend
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ env.REGISTRY_GHCR }}/${{ github.repository }}-backend
-          subject-digest: ${{ steps.push-backend.outputs.digest }}
+          subject-name: ${{ env.REGISTRY_GHCR }}/${{ github.repository }}
+          subject-digest: ${{ steps.push-linkpipe.outputs.digest }}
           push-to-registry: true 

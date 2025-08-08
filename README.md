@@ -19,14 +19,10 @@ A professional URL shortener with UTM parameter management, built with a modern 
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   React Frontend │    │   Express API   │    │  PostgreSQL DB  │
-│   (Vite + TS)   │───▶│   + Prisma      │───▶│   + pgAdmin     │
+│   React Frontend │    │  Unified Server  │    │  PostgreSQL DB  │
+│   (Built into    │───▶│  Express API    │───▶│   + pgAdmin     │
+│    Express)      │    │  + Redirect     │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                        │
-┌─────────────────┐    ┌─────────────────┐             │
-│  Short URL      │    │ Redirect Service │             │
-│  (go.domain.com)│───▶│   Express       │─────────────┘
-└─────────────────┘    └─────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -55,9 +51,7 @@ A professional URL shortener with UTM parameter management, built with a modern 
    ```
    
    This will start:
-   - **Frontend**: http://localhost:3000
-   - **API**: http://localhost:8000
-   - **Redirect Service**: http://localhost:8001
+   - **Unified Server**: http://localhost:8000 (API + Frontend + Redirect)
    - **PostgreSQL**: localhost:5433
    - **pgAdmin**: http://localhost:8003
 
@@ -72,39 +66,35 @@ A professional URL shortener with UTM parameter management, built with a modern 
    ```
 
 4. **Access the Application**
-   - **Frontend**: http://localhost:3000
+   - **Frontend**: http://localhost:8000
    - **API Health**: http://localhost:8000/health
+   - **API Endpoints**: http://localhost:8000/api
    - **pgAdmin**: http://localhost:8003 (admin@linkpipe.local / admin)
 
 ## 📁 Project Structure
 
 ```
 linkpipe/
-├── frontend/              # React + Vite frontend
+├── frontend/              # React + Vite frontend (built into backend/public/)
 │   ├── src/
 │   │   ├── components/    # Reusable UI components
 │   │   ├── pages/         # Route pages
 │   │   ├── lib/           # API client and utilities
 │   │   └── App.tsx        # Main app component
-│   ├── Dockerfile.dev     # Development Docker config
 │   └── vercel.json        # Vercel deployment config
-├── backend/               # Node.js API with Express + Prisma
+├── backend/               # Unified Node.js server (API + Frontend + Redirect)
 │   ├── src/
-│   │   ├── routes/        # Express routes
+│   │   ├── routes/        # Express routes (API + Redirect)
 │   │   ├── lib/           # Prisma database layer
 │   │   ├── middleware/    # Express middleware
 │   │   └── types.ts       # TypeScript types
 │   ├── prisma/            # Prisma schema and migrations
 │   │   ├── schema.prisma  # Database schema
 │   │   └── migrations/    # Database migrations
+│   ├── public/            # Built React frontend (served by Express)
 │   └── sql/               # SQL initialization scripts
 ├── shared/                # Shared TypeScript types and utilities
-│   └── src/
-│       ├── types.ts       # Common types and Zod schemas
-│       └── utils.ts       # Shared utility functions
-├── docker-compose.yml     # Local development environment
-├── .env.example           # Environment variables template
-└── package.json           # Workspace configuration
+└── docker-compose.yml     # Unified Docker setup
 ```
 
 ## 🛡️ Environment Configuration
