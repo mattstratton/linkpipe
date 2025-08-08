@@ -348,6 +348,7 @@ export class PrismaDatabase {
 
   private prismaLinkToShortLink(link: any): ShortLink {
     return {
+      id: link.id,
       slug: link.slug,
       url: link.url,
       domain: link.domain,

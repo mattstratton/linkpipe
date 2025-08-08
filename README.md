@@ -93,6 +93,11 @@ linkpipe/
 │   │   └── migrations/    # Database migrations
 │   ├── public/            # Built React frontend (served by Express)
 │   └── sql/               # SQL initialization scripts
+├── infra/                 # Infrastructure as Code (Pulumi)
+│   ├── index.ts           # Main infrastructure definition
+│   ├── package.json       # Pulumi dependencies
+│   ├── deploy.sh          # Deployment automation script
+│   └── README.md          # Infrastructure documentation
 ├── shared/                # Shared TypeScript types and utilities
 └── docker-compose.yml     # Unified Docker setup
 ```
@@ -140,14 +145,46 @@ PGADMIN_PORT=9003
 
 ## 🌍 Deployment Options
 
-### Option 1: Docker Production
+### Option 1: AWS with Pulumi (Recommended) ⭐
+
+Deploy to AWS using Infrastructure as Code with Pulumi:
+
+```bash
+# Navigate to infrastructure directory
+cd infra
+
+# Run the deployment script
+./deploy.sh dev latest mattstratton/linkpipe
+
+# Or deploy manually
+npm install
+pulumi stack init dev
+pulumi config set aws:region us-east-1
+pulumi config set --secret linkpipe:dbPassword your-secure-password
+pulumi config set --secret linkpipe:jwtSecret your-jwt-secret
+pulumi config set --secret linkpipe:sessionSecret your-session-secret
+pulumi up
+```
+
+**Features:**
+- 🏗️ **ECS Fargate** - Serverless container orchestration
+- 🗄️ **RDS PostgreSQL** - Managed database with high availability
+- 🌐 **Application Load Balancer** - HTTP/HTTPS traffic distribution
+- 🔒 **VPC & Security Groups** - Isolated network infrastructure
+- 📊 **CloudWatch** - Logging and monitoring
+- 🔄 **Auto-scaling** - Automatic scaling based on demand
+- 🛡️ **SSL/TLS** - Automatic HTTPS with ACM certificates
+
+**Cost:** ~$55-75/month for production setup
+
+### Option 2: Docker Production
 
 ```bash
 # Build and run production containers
 docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
-### Option 2: Vercel Frontend + Railway Backend
+### Option 3: Vercel Frontend + Railway Backend
 
 1. **Deploy Backend to Railway**
    ```bash
@@ -162,7 +199,7 @@ docker-compose -f docker-compose.prod.yml up -d --build
    vercel --prod
    ```
 
-### Option 3: Full VPS Deployment
+### Option 4: Full VPS Deployment
 
 ```bash
 # Clone and setup on your VPS

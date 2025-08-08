@@ -29,14 +29,24 @@ COPY backend/ ./backend/
 # Copy frontend source
 COPY frontend/ ./frontend/
 
+# Install all dependencies and build
+WORKDIR /app
+RUN npm install --include=dev
+
+# Build shared module first
+RUN npm run build --workspace=@linkpipe/shared
+
+# Build frontend for production
+RUN npm run build --workspace=@linkpipe/frontend
+
 # Set working directory to backend
 WORKDIR /app/backend
 
 # Generate Prisma client
 RUN npx prisma generate
 
-# Build frontend for production
-RUN npm run build:frontend
+# Build backend for production
+RUN npm run build
 
 # Build backend for production
 RUN npm run build
