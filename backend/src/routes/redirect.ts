@@ -172,8 +172,15 @@ function createErrorPage(title: string, message: string, statusCode: number): st
 
 // Catch-all for any other routes (this will be handled by the main server for API routes)
 redirectRouter.get('*', (req: Request, res: Response) => {
-  // Skip root path and API routes
-  if (req.path === '/' || req.path.startsWith('/api/') || req.path === '/health') {
+  // Skip root path, API routes, health check, and SPA routes
+  if (req.path === '/' || 
+      req.path.startsWith('/api/') || 
+      req.path === '/health' ||
+      req.path.startsWith('/dashboard') ||
+      req.path.startsWith('/create') ||
+      req.path.startsWith('/settings') ||
+      req.path.startsWith('/users') ||
+      req.path.startsWith('/login')) {
     return; // Let the main server handle these routes
   }
   
