@@ -25,6 +25,20 @@ async function seedDatabaseIfNeeded() {
   try {
     console.log('🔍 Checking if database needs seeding...')
     
+    // First, run Prisma migrations to ensure database schema exists
+    console.log('🔄 Running database migrations...')
+    const { execSync } = require('child_process')
+    try {
+      execSync('npx prisma migrate deploy', { 
+        stdio: 'inherit',
+        env: { ...process.env }
+      })
+      console.log('✅ Database migrations completed')
+    } catch (error) {
+      console.error('❌ Error running migrations:', error)
+      // Continue anyway - maybe tables already exist
+    }
+    
     // Check if any users exist
     const userCount = await prismaDb.getAllUsers()
     

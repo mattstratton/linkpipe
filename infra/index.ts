@@ -150,7 +150,8 @@ const taskDefinition = new aws.ecs.TaskDefinition("linkpipe-task", {
             { name: "POSTGRES_USER", value: "linkpipe" },
             { name: "POSTGRES_PASSWORD", value: dbPassword },
             { name: "JWT_SECRET", value: jwtSecret },
-            { name: "SESSION_SECRET", value: sessionSecret }
+            { name: "SESSION_SECRET", value: sessionSecret },
+            { name: "DATABASE_URL", value: pulumi.interpolate`postgresql://linkpipe:${dbPassword}@${db.endpoint}/linkpipe` }
         ],
         logConfiguration: {
             logDriver: "awslogs",
